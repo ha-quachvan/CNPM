@@ -96,38 +96,100 @@ try {
   const customer = await account('customer');
   await customer.screenshot({ path: 'artifacts/customer-desktop.png', fullPage: true });
   await navigate(customer, 'hubs');
-  await customer.locator('[data-action=hub-detail][data-id=hub-a]').click();
+  await customer.locator('[data-action=hub-detail][data-id=hub-metro]').click();
   await dialog(customer).locator('[data-action=reserve-vehicle]').first().click();
+  await dialog(customer).locator('[name=returnHubId]').selectOption('hub-bk');
   await clickDialog(customer, 'Giữ xe 15 phút');
   const r = (await ws(customer)).reservations.find(
     (r) => r.kind === 'VEHICLE' && r.status === 'HELD',
   );
-  assert.ok(r);
+  assert.equal(r.plannedReturnHubId, 'hub-bk');
+  assert.equal(
+    (await ws(customer)).spaces.find((p) => p.id === r.plannedReturnSpaceId).status,
+    'HELD',
+  );
   await customer.locator(`[data-action=pickup][data-id="${r.id}"]`).click();
   await dialog(customer).locator('[name=code]').fill('000000');
   await dialog(customer).getByRole('button', { name: 'Xác nhận nhận xe', exact: true }).click();
   await dialog(customer).locator('#dialog-error').waitFor({ state: 'visible' });
   await dialog(customer).locator('[name=code]').fill(r.pickupCode);
   await clickDialog(customer, 'Xác nhận nhận xe');
+  await customer.locator('[data-action=destination-change]').click();
+  await dialog(customer).locator('[name=hubId]').selectOption('hub-library');
+  await clickDialog(customer, 'Xác nhận đổi');
   await customer.getByRole('button', { name: 'Trả xe tại Hub', exact: true }).click();
+  assert.equal(await dialog(customer).locator('[name=hubId]').inputValue(), 'hub-library');
+  await dialog(customer).locator('[name=arrived]').check();
   await clickDialog(customer, 'Xác nhận trả xe');
-  assert.equal((await ws(customer)).rentals[0].status, 'COMPLETED');
-  await navigate(customer, 'reservations');
-  await customer.getByRole('button', { name: 'Đặt chỗ đỗ', exact: true }).click();
+  const returned = (await ws(customer)).rentals.find((x) => x.reservationId === r.id);
+  assert.equal(returned.status, 'COMPLETED');
+  assert.equal(returned.penalty, 0);
+  await navigate(customer, 'vehicles');
+  await customer.getByRole('button', { name: 'Đặt chỗ đỗ', exact: true }).first().click();
   await dialog(customer).locator('[name=hubId]').selectOption('hub-b');
   await clickDialog(customer, 'Giữ chỗ đỗ');
   await customer.getByRole('button', { name: 'Xác nhận đỗ', exact: true }).click();
   await clickDialog(customer, 'Xe đã vào chỗ');
+  assert.equal(
+    (await ws(customer)).vehicles.find((v) => v.id === 'personal-2').currentHubId,
+    'hub-b',
+  );
+  await customer.locator('[data-action=parking-checkout][data-id=personal-2]').click();
+  await clickDialog(customer, 'Xác nhận lấy xe');
+  assert.equal(
+    (await ws(customer)).vehicles.find((v) => v.id === 'personal-2').currentHubId,
+    undefined,
+  );
   await navigate(customer, 'charging');
   await customer.getByRole('button', { name: 'Yêu cầu sạc', exact: true }).click();
   await dialog(customer).locator('[name=vehicleId]').selectOption('personal-1');
+  await dialog(customer).locator('[name=targetBattery]').fill('36');
   await clickDialog(customer, 'Gửi yêu cầu');
+  const chargeRequest = (await ws(customer)).reservations.find(
+    (r) => r.kind === 'CHARGING' && r.vehicleId === 'personal-1' && r.status === 'HELD',
+  );
+  assert.ok(chargeRequest);
   await customer.getByRole('button', { name: 'Bắt đầu sạc', exact: true }).click();
   await clickDialog(customer, 'Bắt đầu sạc');
-  assert.equal((await ws(customer)).chargingSessions[0].status, 'ACTIVE');
+  const charge = (await ws(customer)).chargingSessions.find((c) => c.vehicleId === 'personal-1');
+  assert.equal(charge.status, 'ACTIVE');
+  const operator = await account('operator');
+  await operator.screenshot({ path: 'artifacts/operator-desktop.png', fullPage: true });
+  await navigate(operator, 'demo');
+  await operator.getByRole('button', { name: '+1 phút', exact: true }).click();
+  await clickDialog(operator, 'Tiến thời gian');
+  await navigate(customer, 'charging');
+  assert.equal(
+    (await ws(customer)).chargingSessions.find((c) => c.id === charge.id).status,
+    'AWAITING_DISCONNECT',
+  );
+  await customer.getByRole('button', { name: 'Ngắt kết nối', exact: true }).click();
+  await clickDialog(customer, 'Xác nhận ngắt kết nối');
+  assert.equal(
+    (await ws(customer)).chargingSessions.find((c) => c.id === charge.id).status,
+    'COMPLETED',
+  );
+  await navigate(customer, 'vehicles');
+  await customer.locator('[data-action=parking-checkout][data-id=personal-1]').click();
+  await clickDialog(customer, 'Xác nhận lấy xe');
+  await navigate(customer, 'notifications');
+  assert.ok((await ws(customer)).notifications.some((n) => n.kind === 'CHARGE_TARGET'));
+  await customer.getByRole('button', { name: 'Đánh dấu đã đọc', exact: true }).click();
+  await customer.getByText('Đã đánh dấu thông báo đã đọc.', { exact: true }).waitFor();
+  assert.ok((await ws(customer)).notifications.every((n) => n.readAt));
+  await navigate(operator, 'charging');
+  await operator.locator('[data-action=charge-stop][data-id=session-seed-active]').click();
+  await clickDialog(operator, 'Dừng sạc');
+  await operator.locator('[data-action=charge-disconnect][data-id=session-seed-active]').click();
+  await clickDialog(operator, 'Xác nhận ngắt kết nối');
+  assert.equal(
+    (await ws(operator)).reservations.find((r) => r.id === 'charge-seed-wait-2').status,
+    'HELD',
+  );
+  await operator.screenshot({ path: 'artifacts/charging-operator.png', fullPage: true });
   await navigate(customer, 'incidents');
   await customer.getByRole('button', { name: 'Báo cáo sự cố', exact: true }).click();
-  await dialog(customer).locator('[name=targetId]').selectOption('hub-a-v2');
+  await dialog(customer).locator('[name=targetId]').selectOption('hub-a-v3');
   await dialog(customer).locator('[name=description]').fill('Phanh xe cần kiểm tra.');
   await clickDialog(customer, 'Gửi báo cáo');
   const incident = (await ws(customer)).incidents.find(
@@ -137,22 +199,28 @@ try {
   await customer.locator('[name=fullName]').fill('Nguyễn Minh Anh');
   await customer.getByRole('button', { name: 'Lưu thay đổi', exact: true }).click();
   await customer.getByText('Đã lưu thông tin cá nhân.', { exact: true }).waitFor();
-  const operator = await account('operator');
-  await operator.screenshot({ path: 'artifacts/operator-desktop.png', fullPage: true });
   await navigate(operator, 'dispatch');
   await operator.getByRole('button', { name: 'Tạo lệnh điều phối', exact: true }).click();
+  await dialog(operator).locator('[name=fromHubId]').selectOption('hub-a');
   await dialog(operator).locator('[name=toHubId]').selectOption('hub-b');
   await clickDialog(operator, 'Tạo lệnh');
-  const order = (await ws(operator)).dispatchOrders[0];
-  assert.equal(order.status, 'PENDING');
+  const order = (await ws(operator)).dispatchOrders.find((o) => o.status === 'PENDING');
+  assert.ok(order);
   await navigate(operator, 'what-if');
   await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
-  await operator.getByRole('heading', { name: 'Kết quả phân tích', exact: true }).waitFor();
   await operator.getByRole('heading', { name: 'Khuyến nghị vận hành', exact: true }).waitFor();
-  await operator.locator('#scenario-type').selectOption('PORT_FAILURE');
-  await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
-  await operator.getByText('Cổng sạc gặp sự cố · Ký túc xá Khu A', { exact: false }).waitFor();
-  assert.equal(await operator.locator('#scenario-type').inputValue(), 'PORT_FAILURE');
+  for (const type of ['HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE']) {
+    await operator.locator('#scenario-type').selectOption(type);
+    const response = operator.waitForResponse(
+      (r) => r.url().endsWith('/api/what-if') && r.request().method() === 'POST',
+    );
+    await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
+    assert.equal((await response).status(), 200);
+    await operator.getByText('Mô phỏng hoàn tất.', { exact: true }).last().waitFor();
+    assert.equal(await operator.locator('#scenario-type').inputValue(), type);
+    assert.equal(await operator.locator('#whatif-error').isVisible(), false);
+  }
+  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
   await operator.screenshot({ path: 'artifacts/whatif-desktop.png', fullPage: true });
   const technician = await account('technician');
   await navigate(technician, 'incidents');
@@ -170,23 +238,42 @@ try {
     (await ws(technician)).dispatchOrders.find((o) => o.id === order.id).status,
     'COMPLETED',
   );
-  await navigate(operator, 'demo');
-  await operator.getByRole('button', { name: '+1 giờ', exact: true }).click();
-  await clickDialog(operator, 'Tiến thời gian');
-  await navigate(customer, 'charging');
-  assert.equal((await ws(customer)).chargingSessions[0].status, 'COMPLETED');
   for (const [name, p, pages] of [
     [
       'customer',
       customer,
-      ['overview', 'hubs', 'reservations', 'rentals', 'charging', 'incidents', 'profile'],
+      [
+        'overview',
+        'hubs',
+        'reservations',
+        'rentals',
+        'vehicles',
+        'charging',
+        'incidents',
+        'notifications',
+        'profile',
+      ],
     ],
     [
       'operator',
       operator,
-      ['overview', 'hubs', 'dispatch', 'incidents', 'what-if', 'demo', 'profile'],
+      [
+        'overview',
+        'hubs',
+        'dispatch',
+        'charging',
+        'incidents',
+        'what-if',
+        'demo',
+        'notifications',
+        'profile',
+      ],
     ],
-    ['technician', technician, ['overview', 'hubs', 'dispatch', 'incidents', 'profile']],
+    [
+      'technician',
+      technician,
+      ['overview', 'hubs', 'dispatch', 'incidents', 'notifications', 'profile'],
+    ],
   ]) {
     for (const width of [1440, 768, 390]) {
       await p.setViewportSize({ width, height: 900 });
@@ -220,7 +307,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: three-role browser workflows, 57 page/viewport checks, no uncaught JS errors.',
+    'PASS: three-role browser workflows, 72 page/viewport checks, no uncaught JS errors.',
   );
 } finally {
   await Promise.all(contexts.map((c) => c.close()));

@@ -107,6 +107,8 @@ export class VehicleReservation extends Reservation {
   declare kind: ReservationKind.VEHICLE;
   vehicleId!: ID;
   pickupCode!: string;
+  plannedReturnHubId!: ID;
+  plannedReturnSpaceId!: ID;
   constructor(data: Partial<VehicleReservation> = {}) {
     super(data);
     Object.assign(this, data);
@@ -129,6 +131,8 @@ export class ChargingReservation extends Reservation {
   portId?: ID;
   targetBattery!: number;
   requiredBy?: Timestamp;
+  preferredPortId?: ID;
+  waitingReason?: string;
   constructor(data: Partial<ChargingReservation> = {}) {
     super(data);
     Object.assign(this, data);
@@ -141,6 +145,8 @@ export class Rental {
   vehicleId!: ID;
   reservationId!: ID;
   pickupHubId!: ID;
+  plannedReturnHubId!: ID;
+  plannedReturnSpaceId!: ID;
   returnHubId?: ID;
   startedAt!: Timestamp;
   endedAt?: Timestamp;
@@ -160,6 +166,8 @@ export class ChargingSession {
   startedAt!: Timestamp;
   updatedAt!: Timestamp;
   endedAt?: Timestamp;
+  stoppedAt?: Timestamp;
+  stopReason?: 'TARGET' | 'MANUAL';
   targetBattery!: number;
   status!: ChargingSessionStatus;
   constructor(data: Partial<ChargingSession> = {}) {
@@ -214,6 +222,11 @@ export class SimulationResult {
   generatedAt!: Timestamp;
   metrics!: Map<string, number>;
   recommendations!: string[];
+  comparison?: import('./types.js').SimulationComparison;
+  actions?: import('./types.js').SimulationAction[];
+  timeline?: import('./types.js').SimulationFrame[];
+  assumptions?: string[];
+  effects?: string[];
   constructor(data: Partial<SimulationResult> = {}) {
     Object.assign(this, data);
   }

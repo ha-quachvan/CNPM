@@ -13,9 +13,10 @@ import {
   DispatchStatus,
 } from '../models/enums.js';
 import type { NetworkState, AnyReservation, ResourceRef, ID } from '../models/types.js';
-import type { Vehicle, User } from '../models/entities.js';
+import type { Vehicle, User, ParkingSpace } from '../models/entities.js';
 import { ensure, must } from './errors.js';
 import { config } from './config.js';
+import { id } from './security.js';
 export const held = (r: AnyReservation) =>
   r.status === ReservationStatus.HELD || r.status === ReservationStatus.WAITING;
 export function actor(s: NetworkState, userId: ID, roles?: Role[]): User {
@@ -49,16 +50,21 @@ export function freeVehicle(s: NetworkState, v: Vehicle): boolean {
     v.status === VehicleStatus.AVAILABLE &&
     v.batteryLevel >= config.minBattery &&
     !!v.currentHubId &&
+    !!v.parkingSpaceId &&
+    ![...s.reservations.values()].some(
+      (r) => r.kind === ReservationKind.CHARGING && r.vehicleId === v.id && held(r),
+    ) &&
+    !connected(s, v.id) &&
     !fault(s, 'VEHICLE', v.id)
   );
 }
 export function canCharge(s: NetworkState, userId: ID, v: Vehicle): void {
+  const u = actor(s, userId, [Role.CUSTOMER, Role.OPERATOR]);
+  if (u.role === Role.CUSTOMER) customer(s, userId);
   ensure(
     v.ownership === VehicleOwnership.PERSONAL
-      ? v.ownerId === userId
-      : [...s.rentals.values()].some(
-          (r) => r.userId === userId && r.vehicleId === v.id && r.status === RentalStatus.ACTIVE,
-        ),
+      ? u.role === Role.CUSTOMER && v.ownerId === userId
+      : u.role === Role.OPERATOR,
     'Forbidden',
     'Bạn không có quyền sử dụng xe này.',
     403,
@@ -69,18 +75,14 @@ export function canCharge(s: NetworkState, userId: ID, v: Vehicle): void {
         VehicleStatus.MAINTENANCE,
         VehicleStatus.IN_TRANSIT,
         VehicleStatus.DISPATCH_RESERVED,
+        VehicleStatus.RESERVED,
       ].includes(v.status),
     'ResourceConflict',
     'Xe không sẵn sàng để sạc.',
   );
 }
 export function restoreVehicle(s: NetworkState, v: Vehicle): void {
-  if (
-    [...s.chargingSessions.values()].some(
-      (c) => c.vehicleId === v.id && c.status === ChargingSessionStatus.ACTIVE,
-    )
-  )
-    v.status = VehicleStatus.CHARGING;
+  if (connected(s, v.id)) v.status = VehicleStatus.CHARGING;
   else if (
     [...s.rentals.values()].some((r) => r.vehicleId === v.id && r.status === RentalStatus.ACTIVE)
   )
@@ -115,6 +117,12 @@ export function restorePort(s: NetworkState, portId: ID): void {
   if (fault(s, 'CHARGING_PORT', p.id)) p.status = PortStatus.FAULT;
   else if (
     [...s.chargingSessions.values()].some(
+      (c) => c.portId === p.id && c.status === ChargingSessionStatus.AWAITING_DISCONNECT,
+    )
+  )
+    p.status = PortStatus.CONNECTED;
+  else if (
+    [...s.chargingSessions.values()].some(
       (c) => c.portId === p.id && c.status === ChargingSessionStatus.ACTIVE,
     )
   )
@@ -131,13 +139,17 @@ export function restorePort(s: NetworkState, portId: ID): void {
   else p.status = PortStatus.FREE;
 }
 export function releaseReservation(s: NetworkState, r: AnyReservation): void {
-  if (r.kind === ReservationKind.VEHICLE) restoreVehicle(s, must(s.vehicles, r.vehicleId));
+  if (r.kind === ReservationKind.VEHICLE) {
+    restoreVehicle(s, must(s.vehicles, r.vehicleId));
+    releaseReturnHold(s, r.id);
+  }
   if ('spaceId' in r) {
     const p = must(s.spaces, r.spaceId);
     if (
       p.status === SpaceStatus.HELD &&
       !p.vehicleId &&
       !s.dispatchSpaceHolds.has(p.id) &&
+      !s.returnSpaceHolds.has(p.id) &&
       ![...s.reservations.values()].some(
         (other) =>
           other.id !== r.id &&
@@ -172,4 +184,63 @@ export function resourceHub(s: NetworkState, target: ResourceRef): ID | undefine
   return target.kind === 'VEHICLE'
     ? s.vehicles.get(target.id)?.currentHubId
     : s.ports.get(target.id)?.hubId;
+}
+
+export function connected(s: NetworkState, vehicleId: ID): boolean {
+  return [...s.chargingSessions.values()].some(
+    (c) =>
+      c.vehicleId === vehicleId &&
+      [ChargingSessionStatus.ACTIVE, ChargingSessionStatus.AWAITING_DISCONNECT].includes(c.status),
+  );
+}
+export function freeSpace(s: NetworkState, p: ParkingSpace): boolean {
+  return (
+    p.status === SpaceStatus.FREE &&
+    !p.vehicleId &&
+    !s.dispatchSpaceHolds.has(p.id) &&
+    !s.returnSpaceHolds.has(p.id)
+  );
+}
+export function releaseReturnHold(s: NetworkState, reservationId: ID): void {
+  for (const [spaceId, owner] of s.returnSpaceHolds)
+    if (owner === reservationId) {
+      s.returnSpaceHolds.delete(spaceId);
+      const p = must(s.spaces, spaceId);
+      if (p.status === SpaceStatus.HELD && !p.vehicleId) p.status = SpaceStatus.FREE;
+    }
+}
+export function holdReturnSpace(s: NetworkState, reservationId: ID, hubId: ID): ParkingSpace {
+  activeHub(s, hubId);
+  const p = [...s.spaces.values()].find((p) => p.hubId === hubId && freeSpace(s, p));
+  ensure(p, 'InsufficientCapacity', 'Hub trả không còn chỗ tiếp nhận. Hãy chọn Hub khác.');
+  p.status = SpaceStatus.HELD;
+  s.returnSpaceHolds.set(p.id, reservationId);
+  return p;
+}
+export function notify(
+  s: NetworkState,
+  userId: ID,
+  kind: string,
+  title: string,
+  message: string,
+  now: number,
+  referenceId?: ID,
+): void {
+  if (
+    referenceId &&
+    [...s.notifications.values()].some(
+      (n) => n.userId === userId && n.kind === kind && n.referenceId === referenceId,
+    )
+  )
+    return;
+  const notificationId = id('notification');
+  s.notifications.set(notificationId, {
+    id: notificationId,
+    userId,
+    kind,
+    title,
+    message,
+    createdAt: now,
+    referenceId,
+  });
 }

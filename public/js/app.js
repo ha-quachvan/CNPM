@@ -30,6 +30,7 @@ const navItems = {
     ['overview', 'Tổng quan', 'grid'],
     ['hubs', 'Tìm Hub', 'pin'],
     ['reservations', 'Đặt chỗ của tôi', 'calendar'],
+    ['vehicles', 'Xe cá nhân', 'bike'],
     ['rentals', 'Chuyến đi', 'route'],
     ['charging', 'Sạc xe', 'bolt'],
     ['incidents', 'Báo cáo sự cố', 'alert'],
@@ -38,6 +39,7 @@ const navItems = {
     ['overview', 'Tổng quan mạng lưới', 'grid'],
     ['hubs', 'Quản lý Hub', 'building'],
     ['dispatch', 'Điều phối xe', 'truck'],
+    ['charging', 'Quản lý sạc', 'bolt'],
     ['incidents', 'Theo dõi sự cố', 'alert'],
     ['what-if', 'Mô phỏng What-if', 'flask'],
     ['demo', 'Công cụ demo', 'settings'],
@@ -67,12 +69,18 @@ const initials = (name) =>
     .toUpperCase();
 const page = () => {
   const p = location.hash.slice(1) || 'overview';
-  return [...navItems[role()].map((x) => x[0]), 'profile'].includes(p) ? p : 'overview';
+  return [...navItems[role()].map((x) => x[0]), 'profile', 'notifications'].includes(p)
+    ? p
+    : 'overview';
 };
 const titleOf = (p) =>
-  p === 'profile' ? 'Hồ sơ cá nhân' : navItems[role()].find((x) => x[0] === p)?.[1] || 'Tổng quan';
+  p === 'notifications'
+    ? 'Thông báo'
+    : p === 'profile'
+      ? 'Hồ sơ cá nhân'
+      : navItems[role()].find((x) => x[0] === p)?.[1] || 'Tổng quan';
 const stat = (title, value, glyph, note = '') =>
-  `<div class="stat"><div class="stat-top"><span>${esc(title)}</span>${icon(glyph)}</div><div class="stat-value">${esc(value)}</div><div class="stat-foot">${esc(note)}</div></div>`;
+  `<div class="stat"><div class="stat-top"><span>${esc(title)}</span></div><div class="stat-value">${esc(value)}</div><div class="stat-foot">${esc(note)}</div></div>`;
 const panel = (title, subtitle, content, action = '') =>
   `<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div>${action}</div>${content}</section>`;
 const table = (columns, rows) =>
@@ -80,13 +88,19 @@ const table = (columns, rows) =>
 const battery = (value, target) =>
   `<span class="battery"><span class="battery-track"><span style="width:${Math.max(0, Math.min(100, Number(value)))}%"></span></span>${Math.round(value)}%${target ? ` / ${target}%` : ''}</span>`;
 const countdown = (r) =>
-  `<span class="countdown">${icon('clock')}<span data-expires="${r.expiresAt}"></span></span>`;
+  `<span class="countdown"><span data-expires="${r.expiresAt}"></span></span>`;
 const go = (p) => {
   if (location.hash === '#' + p) render();
   else location.hash = p;
 };
 async function load(force = false) {
+  const previous = state.data ? new Set((state.data.notifications || []).map((n) => n.id)) : null;
   state.data = await api('/workspace');
+  state.loadedAt = Date.now();
+  if (previous) {
+    const recent = state.data.notifications.filter((n) => !previous.has(n.id) && !n.readAt);
+    if (recent.length) toast(recent[0].title);
+  }
   const expected = `/pages/${role().toLowerCase()}/index.html`;
   if (location.pathname !== expected) {
     location.replace(expected + location.hash);
@@ -96,31 +110,35 @@ async function load(force = false) {
   if (
     force ||
     (!document.querySelector('#dialog').open &&
-      !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName))
+      !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) &&
+      !document.querySelector('#whatif-form, #profile-form, #hub-search'))
   )
     render();
 }
 function shell() {
   const u = d().user;
+  const unread = d().notifications.filter((n) => !n.readAt).length;
   document.querySelector('#sidebar').innerHTML =
-    `<a class="brand" href="#overview"><span class="brand-mark">${icon('bolt')}</span><span><span class="brand-title">E-Mobility Hub</span><span class="brand-sub">SMART CAMPUS · ĐHQG-HCM</span></span></a><div class="nav-section">KHÔNG GIAN LÀM VIỆC</div><nav>${navItems[u.role].map(([id, title, glyph]) => `<a href="#${id}" class="nav-item ${page() === id ? 'active' : ''}" ${page() === id ? 'aria-current="page"' : ''}>${icon(glyph)}${esc(title)}</a>`).join('')}</nav><div class="sidebar-bottom"><div class="nav-section">TÀI KHOẢN</div><a href="#profile" class="nav-item ${page() === 'profile' ? 'active' : ''}">${icon('user')}Hồ sơ cá nhân</a><div class="sidebar-note"><strong>Di chuyển cùng cộng đồng</strong>Tìm xe, đặt chỗ và kết nối các Hub trong khu đô thị ĐHQG-HCM.</div><div class="user-block"><span class="avatar">${esc(initials(u.fullName))}</span><div><div class="user-name">${esc(u.fullName)}</div><div class="user-role">${esc(label(u.role))}</div></div><button class="icon-btn" data-action="logout" aria-label="Đăng xuất" title="Đăng xuất">${icon('logout')}</button></div></div>`;
+    `<a class="brand" href="#overview"><span class="brand-mark">EM</span><span><span class="brand-title">E-Mobility Hub</span><span class="brand-sub">ĐHQG-HCM · VẬN HÀNH</span></span></a><div class="nav-section">${esc(label(u.role))}</div><nav>${navItems[u.role].map(([id, title]) => `<a href="#${id}" class="nav-item ${page() === id ? 'active' : ''}" ${page() === id ? 'aria-current="page"' : ''}>${esc(title)}</a>`).join('')}</nav><div class="sidebar-bottom"><a href="#notifications" class="nav-item ${page() === 'notifications' ? 'active' : ''}">Thông báo ${unread ? `<span class="count-pill">${unread}</span>` : ''}</a><a href="#profile" class="nav-item ${page() === 'profile' ? 'active' : ''}">Hồ sơ cá nhân</a><div class="user-block"><span class="avatar">${esc(initials(u.fullName))}</span><div><div class="user-name">${esc(u.fullName)}</div><div class="user-role">${esc(label(u.role))}</div></div><button class="text-logout" data-action="logout">Thoát</button></div></div>`;
   document.querySelector('#topbar').innerHTML =
-    `<div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Mở điều hướng">${icon('menu')}</button><span>Không gian làm việc</span>${icon('chevron')}<strong>${esc(titleOf(page()))}</strong></div><div class="top-meta"><span><i class="live-dot"></i>Đang kết nối</span><time>${new Date(d().serverNow).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}</time><button class="icon-btn" data-action="refresh" aria-label="Làm mới dữ liệu" title="Làm mới">${icon('refresh')}</button></div>`;
+    `<div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Mở điều hướng">${icon('menu')}</button><span>Không gian làm việc</span><span class="crumb-separator">/</span><strong>${esc(titleOf(page()))}</strong></div><div class="top-meta"><span class="environment-label">Môi trường demo</span><button class="btn secondary small" data-action="go" data-id="notifications">Thông báo${unread ? ` (${unread})` : ''}</button><button class="btn secondary small" data-action="refresh">Làm mới</button></div>`;
 }
+
 function mapView() {
-  return `<div class="map"><span class="map-logo">KHU ĐÔ THỊ ĐHQG-HCM</span><svg class="campus" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="640" height="300" fill="#f1f6fb"/><g fill="#e6edf5"><rect x="40" y="65" width="65" height="48" rx="7"/><rect x="145" y="40" width="80" height="45" rx="7"/><rect x="275" y="80" width="70" height="55" rx="7"/><rect x="490" y="40" width="70" height="70" rx="7"/><rect x="455" y="200" width="65" height="40" rx="7"/><rect x="100" y="205" width="90" height="40" rx="7"/><rect x="280" y="230" width="80" height="40" rx="7"/></g><g stroke="#fff" stroke-width="18" fill="none"><path d="M0 165H640M245 0v300M460 0v300M0 20l640 280"/></g><path d="M155 130 345 190 505 140" stroke="#1488D8" stroke-width="2" stroke-dasharray="5 6" fill="none"/><g fill="#dbe9e4"><circle cx="40" cy="245" r="18"/><circle cx="580" cy="230" r="28"/><circle cx="390" cy="52" r="20"/></g></svg>${d()
-    .hubs.slice(0, 3)
-    .map(
-      (h, i) =>
-        `<button class="map-pin" style="left:${[16, 43, 68][i]}%;top:${[35, 58, 27][i]}%" data-action="hub-detail" data-id="${esc(h.id)}">${icon('pin')}${esc(h.name)}</button>`,
-    )
-    .join('')}<span class="map-legend">Sơ đồ vị trí Hub · mô phỏng</span></div>`;
+  return table(
+    ['Hub', 'Xe sẵn sàng', 'Chỗ trống', 'Trạng thái'],
+    d().hubs.map(
+      (h) =>
+        `<tr><td><button class="link-button" data-action="hub-detail" data-id="${esc(h.id)}">${esc(h.name)}</button></td><td>${h.availableVehicles}</td><td>${h.freeSpaces}/${h.totalSpaces}</td><td>${badge(h.status)}</td></tr>`,
+    ),
+  );
 }
+
 function heading(title, desc, action = '') {
   return `<div class="page-heading"><div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div>${action}</div>`;
 }
 function quick(title, desc, glyph, view) {
-  return `<button class="quick-action" data-action="go" data-id="${view}">${icon(glyph)}<span><b>${esc(title)}</b><small>${esc(desc)}</small></span>${icon('chevron')}</button>`;
+  return `<button class="quick-action" data-action="go" data-id="${view}"><span><b>${esc(title)}</b><small>${esc(desc)}</small></span></button>`;
 }
 function overview() {
   if (role() === 'OPERATOR') return operatorOverview();
@@ -131,7 +149,7 @@ function overview() {
   return (
     heading(
       `Xin chào, ${d().user.fullName.split(' ').slice(-1)[0]}`,
-      'Bạn muốn bắt đầu hành trình từ đâu hôm nay?',
+      'Theo dõi chuyến đi, xe cá nhân và các yêu cầu đang hoạt động.',
       button('Tìm Hub gần bạn', 'go', 'hubs', 'primary', 'arrow'),
     ) +
     `<div class="cards">${stat(
@@ -144,7 +162,7 @@ function overview() {
       'Thông tin cần thiết ngay lúc này',
       `<div class="panel-body">${
         rental
-          ? `<div class="notice">${icon('route')}Bạn đang sử dụng <strong>${esc(vehicleName(rental.vehicleId))}</strong> từ ${date(rental.startedAt)}.</div>${button('Xem chuyến đi', 'go', 'rentals', 'primary', 'arrow')}`
+          ? `<div class="notice">Bạn đang sử dụng <strong>${esc(vehicleName(rental.vehicleId))}</strong> từ ${date(rental.startedAt)}.</div>${button('Xem chuyến đi', 'go', 'rentals', 'primary', 'arrow')}`
           : active.length
             ? active
                 .slice(0, 2)
@@ -164,9 +182,7 @@ function overview() {
 }
 function operatorOverview() {
   const hubs = d().hubs;
-  const active = d().vehicles.filter(
-    (v) => v.status === 'AVAILABLE' && v.ownership === 'SHARED',
-  ).length;
+  const active = hubs.reduce((sum, h) => sum + h.availableVehicles, 0);
   const occupied = d().spaces.filter((p) => p.status === 'OCCUPIED').length;
   const open = d().incidents.filter((i) => i.status !== 'RESOLVED').length;
   return (
@@ -175,7 +191,18 @@ function operatorOverview() {
       'Theo dõi nguồn lực và nhịp vận hành trong khu đô thị.',
       button('Tạo lệnh điều phối', 'dispatch-new', '', 'primary', 'plus'),
     ) +
-    `<div class="cards">${stat('Hub trong mạng lưới', hubs.length, 'building', `${hubs.filter((h) => h.status === 'ACTIVE').length} Hub đang hoạt động`)}${stat('Xe có thể sử dụng', active, 'bike', 'Xe dùng chung tại các Hub')}${stat('Chỗ đỗ đang dùng', `${occupied}/${d().spaces.length}`, 'parking', 'Không bao gồm các chỗ đang giữ')}${stat('Sự cố cần xử lý', open, 'alert', 'Theo dõi cùng đội kỹ thuật')}</div><div class="split">${panel('Phân bố tài nguyên', 'Chọn một Hub để xem chi tiết', mapView())}${panel('Mức sử dụng chỗ đỗ', 'Chỗ có xe và chỗ đang được giữ', `<div class="panel-body">${hubs.map((h) => `<div class="load-row"><div class="load-label"><span>${esc(h.name)}</span><span class="muted">${h.totalSpaces - h.freeSpaces}/${h.totalSpaces}</span></div><div class="progress"><span style="width:${((h.totalSpaces - h.freeSpaces) / h.totalSpaces) * 100}%"></span></div></div>`).join('')}</div>`)}</div>${panel('Lệnh điều phối gần đây', 'Từ kế hoạch đến xác nhận xe tới Hub đích', dispatchTable(d().dispatchOrders.slice(0, 4)), button('Tất cả lệnh', 'go', 'dispatch', 'ghost small'))}${panel('Sự cố mới nhất', 'Phối hợp với đội kỹ thuật', incidentTable(d().incidents.slice(0, 3)), button('Theo dõi sự cố', 'go', 'incidents', 'ghost small'))}`
+    `<div class="cards">${stat('Hub trong mạng lưới', hubs.length, 'building', `${hubs.filter((h) => h.status === 'ACTIVE').length} Hub đang hoạt động`)}${stat('Xe có thể sử dụng', active, 'bike', 'Xe dùng chung tại các Hub')}${stat('Chỗ đỗ đang dùng', `${occupied}/${d().spaces.length}`, 'parking', 'Không bao gồm các chỗ đang giữ')}${stat('Sự cố cần xử lý', open, 'alert', 'Theo dõi cùng đội kỹ thuật')}</div><div class="split">${panel('Phân bố tài nguyên', 'Chọn một Hub để xem chi tiết', mapView())}${panel(
+      'Mức sử dụng chỗ đỗ',
+      'Chỗ có xe và chỗ đang được giữ',
+      `<div class="panel-body">${hubs
+        .map((h) => {
+          const used = d().spaces.filter(
+            (p) => p.hubId === h.id && ['OCCUPIED', 'HELD'].includes(p.status),
+          ).length;
+          return `<div class="load-row"><div class="load-label"><span>${esc(h.name)}</span><span class="muted">${h.status === 'ACTIVE' ? `${used}/${h.totalSpaces}` : 'Ngừng phục vụ'}</span></div><div class="progress"><span style="width:${(used / h.totalSpaces) * 100}%"></span></div></div>`;
+        })
+        .join('')}</div>`,
+    )}</div>${panel('Lệnh điều phối gần đây', 'Từ kế hoạch đến xác nhận xe tới Hub đích', dispatchTable(d().dispatchOrders.slice(0, 4)), button('Tất cả lệnh', 'go', 'dispatch', 'ghost small'))}${panel('Sự cố mới nhất', 'Phối hợp với đội kỹ thuật', incidentTable(d().incidents.slice(0, 3)), button('Theo dõi sự cố', 'go', 'incidents', 'ghost small'))}`
   );
 }
 function technicianOverview() {
@@ -203,7 +230,7 @@ function hubsView() {
       role() === 'CUSTOMER' ? 'Tìm Hub' : 'Tra cứu mạng lưới Hub',
       'Tìm phương tiện, vị trí đỗ và cổng sạc phù hợp.',
     ) +
-    `<form id="hub-search" class="toolbar"><label class="search-input" aria-label="Tìm theo tên Hub">${icon('search')}<input name="area" placeholder="Tìm theo tên Hub…" value="${esc(q.get('area') || '')}"></label>${select('vehicleType', option('', 'Tất cả loại xe', q.get('vehicleType')) + option('E_BIKE', 'Xe đạp điện', q.get('vehicleType')) + option('E_MOTORBIKE', 'Xe máy điện', q.get('vehicleType')), 'aria-label="Loại xe"')}${select('minBattery', option('', 'Mọi mức pin', q.get('minBattery')) + [30, 50, 70, 90].map((v) => option(String(v), `Pin từ ${v}%`, q.get('minBattery'))).join(''), 'aria-label="Pin tối thiểu"')}${select('needs', option('', 'Mọi tài nguyên', q.get('needsParking') === 'true' ? 'parking' : q.get('needsCharging') === 'true' ? 'charging' : '') + option('parking', 'Còn chỗ đỗ', q.get('needsParking') === 'true' ? 'parking' : '') + option('charging', 'Còn cổng sạc', q.get('needsCharging') === 'true' ? 'charging' : ''), 'aria-label="Nhu cầu"')}<button class="btn primary" type="submit">${icon('search')}Tìm kiếm</button></form><div class="inline-status" style="margin-bottom:14px">${hubs.length} Hub phù hợp</div>${hubs.length ? `<div class="hub-grid">${hubs.map((h) => `<article class="hub-card"><div class="hub-top"><span class="hub-symbol">${icon('building')}</span>${badge(h.status)}</div><h3>${esc(h.name)}</h3><span class="hub-address">Khu đô thị ĐHQG-HCM</span><div class="hub-counts"><div><b>${h.availableVehicles}</b><small>Xe sẵn sàng</small></div><div><b>${h.freeSpaces}</b><small>Chỗ đỗ trống</small></div><div><b>${h.freePorts}</b><small>Cổng sạc trống</small></div></div><div class="hub-footer"><span>${icon('clock')} ${esc(h.openingHours)}</span>${button('Xem Hub', 'hub-detail', h.id, 'secondary small', 'chevron')}</div></article>`).join('')}</div>` : panel('Kết quả tìm kiếm', '', empty('Chưa có Hub phù hợp', 'Thử đổi loại xe, mức pin hoặc tên Hub.', button('Xóa bộ lọc', 'clear-hubs', '', 'secondary')))}`
+    `<form id="hub-search" class="toolbar"><label class="search-input" aria-label="Tìm theo tên Hub"><input name="area" placeholder="Tìm theo tên Hub…" value="${esc(q.get('area') || '')}"></label>${select('vehicleType', option('', 'Tất cả loại xe', q.get('vehicleType')) + option('E_BIKE', 'Xe đạp điện', q.get('vehicleType')) + option('E_MOTORBIKE', 'Xe máy điện', q.get('vehicleType')), 'aria-label="Loại xe"')}${select('minBattery', option('', 'Mọi mức pin', q.get('minBattery')) + [30, 50, 70, 90].map((v) => option(String(v), `Pin từ ${v}%`, q.get('minBattery'))).join(''), 'aria-label="Pin tối thiểu"')}${select('needs', option('', 'Mọi tài nguyên', q.get('needsParking') === 'true' ? 'parking' : q.get('needsCharging') === 'true' ? 'charging' : '') + option('parking', 'Còn chỗ đỗ', q.get('needsParking') === 'true' ? 'parking' : '') + option('charging', 'Còn cổng sạc', q.get('needsCharging') === 'true' ? 'charging' : ''), 'aria-label="Nhu cầu"')}<button class="btn primary" type="submit">Tìm kiếm</button></form><div class="inline-status" style="margin-bottom:14px">${hubs.length} Hub phù hợp</div>${hubs.length ? `<div class="hub-grid">${hubs.map((h) => `<article class="hub-card"><div class="hub-top">${badge(h.status)}</div><h3>${esc(h.name)}</h3><span class="hub-address">Khu đô thị ĐHQG-HCM</span><div class="hub-counts"><div><b>${h.availableVehicles}</b><small>Xe sẵn sàng</small></div><div><b>${h.freeSpaces}</b><small>Chỗ đỗ trống</small></div><div><b>${h.freePorts}</b><small>Cổng sạc trống</small></div></div><div class="hub-footer"><span> ${esc(h.openingHours)}</span>${button('Xem Hub', 'hub-detail', h.id, 'secondary small', 'chevron')}</div></article>`).join('')}</div>` : panel('Kết quả tìm kiếm', '', empty('Chưa có Hub phù hợp', 'Thử đổi loại xe, mức pin hoặc tên Hub.', button('Xóa bộ lọc', 'clear-hubs', '', 'secondary')))}`
   );
 }
 function reservationCard(r) {
@@ -222,7 +249,10 @@ function reservationCard(r) {
       buttons.push(button('Xác nhận đỗ', 'parking-confirm', r.id, 'primary small', 'parking'));
     if (r.kind === 'CHARGING')
       buttons.push(button('Bắt đầu sạc', 'charge-start', r.id, 'primary small', 'bolt'));
-    buttons.push(button('Đổi tài nguyên', 'reservation-change', r.id, 'secondary small'));
+    if (r.kind !== 'CHARGING')
+      buttons.push(button('Đổi tài nguyên', 'reservation-change', r.id, 'secondary small'));
+    if (r.kind === 'VEHICLE')
+      buttons.push(button('Đổi Hub trả', 'destination-change', r.id, 'secondary small'));
   }
   if (active && r.kind !== 'VEHICLE')
     buttons.push(button('Gia hạn', 'reservation-extend', r.id, 'secondary small', 'clock'));
@@ -237,7 +267,7 @@ function reservationCard(r) {
         'arrow',
       ),
     );
-  return `<article class="reservation-card"><div class="row"><div><span class="eyebrow">${esc(label(r.kind))} · ${short(r.id)}</span><h3 style="margin-top:7px">${esc(hubName(r.hubId))}</h3></div>${badge(r.status)}</div><div class="details"><span>Tài nguyên: <strong>${esc(resource)}</strong></span><span>Tạo lúc: <strong>${date(r.createdAt)}</strong></span>${r.kind === 'CHARGING' ? `<span>Mục tiêu: <strong>${r.targetBattery}%</strong></span>` : ''}</div>${active ? `<div class="row" style="margin:15px 0">${r.kind === 'VEHICLE' ? `<div><div class="muted small">Mã nhận xe</div><div class="reservation-code">${esc(r.pickupCode)}</div></div>` : ''}${countdown(r)}</div>` : ''}<div class="actions">${buttons.join('')}</div></article>`;
+  return `<article class="reservation-card"><div class="row"><div><span class="eyebrow">${esc(label(r.kind))} · ${short(r.id)}</span><h3 style="margin-top:7px">${esc(hubName(r.hubId))}</h3></div>${badge(r.status)}</div><div class="details"><span>Tài nguyên: <strong>${esc(resource)}</strong></span><span>Tạo lúc: <strong>${date(r.createdAt)}</strong></span>${r.kind === 'CHARGING' ? `<span>Mục tiêu: <strong>${r.targetBattery}%</strong></span>` : ''}</div>${r.kind === 'VEHICLE' ? `<p class="destination-note">Trả tại <strong>${esc(hubName(r.plannedReturnHubId))}</strong> · Chỗ ${esc(r.plannedReturnSpaceId)} đã giữ</p>` : ''}${r.waitingReason ? `<p class="waiting-reason">${esc(r.waitingReason)}</p>` : ''}${active ? `<div class="row" style="margin:15px 0">${r.kind === 'VEHICLE' ? `<div><div class="muted small">Mã nhận xe</div><div class="reservation-code">${esc(r.pickupCode)}</div></div>` : ''}${countdown(r)}</div>` : ''}<div class="actions">${buttons.join('')}</div></article>`;
 }
 function reservationsView() {
   const active = state.reservationTab === 'active';
@@ -280,7 +310,7 @@ function rentalsView() {
     active
       .map(
         (r) =>
-          `<section class="panel"><div class="panel-head"><div><h2>${esc(vehicleName(r.vehicleId))}</h2><p>Nhận tại ${esc(hubName(r.pickupHubId))} · ${date(r.startedAt)}</p></div>${badge(r.status)}</div><div class="panel-body"><div class="money-summary">${money(Math.max(1, Math.ceil((d().serverNow - r.startedAt) / 60000)) * d().policy.pricePerMinute)}<small>Phí sử dụng tạm tính · ${money(d().policy.pricePerMinute)}/phút</small></div><p class="muted small" style="margin-bottom:18px">Chọn Hub và vị trí đỗ còn trống để hoàn tất chuyến đi. Khoản phạt trả khác Hub: ${money(d().policy.wrongHubPenalty)}.</p>${button('Trả xe tại Hub', 'rental-return', r.id, 'primary', 'parking')}</div></section>`,
+          `<section class="panel"><div class="panel-head"><div><h2>${esc(vehicleName(r.vehicleId))}</h2><p>Nhận tại ${esc(hubName(r.pickupHubId))} · ${date(r.startedAt)}</p></div>${badge(r.status)}</div><div class="panel-body"><div class="money-summary">${money(Math.max(1, Math.ceil((d().serverNow - r.startedAt) / 60000)) * d().policy.pricePerMinute)}<small>Phí sử dụng tạm tính · ${money(d().policy.pricePerMinute)}/phút</small></div><p class="muted small" style="margin-bottom:18px">Hub trả đã đăng ký: <strong>${esc(hubName(r.plannedReturnHubId))}</strong> · Chỗ ${esc(r.plannedReturnSpaceId)} được giữ cho bạn. Trả sai Hub đăng ký có khoản phạt ${money(d().policy.wrongHubPenalty)}.</p><div class="actions">${button('Trả xe tại Hub', 'rental-return', r.id, 'primary')}${button('Đổi Hub trả', 'destination-change', r.reservationId, 'secondary')}</div></div></section>`,
       )
       .join('') +
     (!active.length
@@ -297,54 +327,146 @@ function rentalsView() {
     panel('Lịch sử chuyến đi', 'Thông tin các phiên đã hoàn tất', rentalTable(history))
   );
 }
-function chargingView() {
-  const active = d().chargingSessions.filter((c) => c.status === 'ACTIVE');
-  const queue = d().reservations.filter(
-    (r) => r.kind === 'CHARGING' && ['WAITING', 'HELD'].includes(r.status),
+function vehiclesView() {
+  const vehicles = d().vehicles.filter(
+    (v) => v.ownership === 'PERSONAL' && v.ownerId === d().user.id,
   );
-  const completed = d()
-    .chargingSessions.filter((c) => c.status !== 'ACTIVE')
-    .slice()
-    .reverse();
+  const visits = d()
+    .parkingVisits.slice()
+    .sort((a, b) => b.enteredAt - a.enteredAt);
+  const active = vehicles.filter((v) => v.parkingSpaceId).length;
   return (
     heading(
-      'Quản lý sạc xe',
-      'Đăng ký sạc và theo dõi năng lượng cho hành trình tiếp theo.',
-      button('Yêu cầu sạc', 'charge-new', '', 'primary', 'plus'),
+      'Xe cá nhân',
+      'Quản lý vị trí đỗ, sạc và xác nhận lấy xe.',
+      button('Đặt chỗ đỗ', 'parking-new', '', 'primary'),
     ) +
-    `<div class="cards">${stat('Phiên đang sạc', active.length, 'bolt', 'Pin được cập nhật theo thời gian')}${stat('Yêu cầu đang chờ', queue.filter((r) => r.status === 'WAITING').length, 'clock', 'Hệ thống phân bổ khi đủ nguồn lực')}${stat('Cổng đã được giữ', queue.filter((r) => r.status === 'HELD').length, 'calendar', 'Bắt đầu trước khi hết hạn')}${stat('Phiên đã hoàn tất', completed.length, 'check', 'Lịch sử sạc của bạn')}</div>${
-      active.length
-        ? `<div class="hub-grid">${active
-            .map((c) => {
-              const v = find('vehicles', c.vehicleId);
-              const r = find('reservations', c.reservationId);
-              return `<article class="hub-card"><div class="hub-top"><span class="hub-symbol">${icon('bolt')}</span>${badge(c.status)}</div><h3>${esc(vehicleName(c.vehicleId))}</h3><span class="hub-address">${esc(hubName(r?.hubId))} · ${esc(c.portId)}</span><div style="margin-top:20px">${battery(v?.batteryLevel || 0, c.targetBattery)}<div class="progress"><span style="width:${Math.min(100, ((v?.batteryLevel || 0) / c.targetBattery) * 100)}%"></span></div></div><p class="small muted">Mục tiêu ${c.targetBattery}% · Bắt đầu ${date(c.startedAt)}</p></article>`;
-            })
-            .join('')}</div><div style="height:20px"></div>`
-        : panel(
-            'Phiên đang sạc',
-            '',
-            empty(
-              'Chưa có phiên đang sạc',
-              'Gửi yêu cầu cho xe cá nhân đang đỗ tại Hub.',
-              button('Tạo yêu cầu sạc', 'charge-new', '', 'secondary', 'bolt'),
-            ),
-          )
-    }${queue.length ? panel('Yêu cầu đang chờ / giữ cổng', 'Cấp cổng theo thời điểm cần xe, mức pin và thứ tự yêu cầu', `<div class="panel-body">${queue.map(reservationCard).join('')}</div>`) : ''}${panel(
-      'Lịch sử sạc',
-      'Các phiên đã kết thúc',
-      completed.length
+    `<div class="cards three">${stat('Xe của bạn', vehicles.length, '', 'Đã đăng ký trong hệ thống')}${stat('Đang gửi tại Hub', active, '', 'Chỗ đỗ tiếp tục được giữ khi sạc')}${stat('Đang ngoài Hub', vehicles.length - active, '', 'Có thể đặt chỗ cho lần đến tiếp theo')}</div>` +
+    panel(
+      'Danh sách phương tiện',
+      'Kết thúc sạc và ngắt kết nối trước khi lấy xe',
+      table(
+        ['Phương tiện', 'Vị trí', 'Pin', 'Thao tác'],
+        vehicles.map(
+          (v) =>
+            `<tr><td><strong>${esc(v.code)}</strong><span class="sub">${esc(label(v.type))}</span></td><td>${v.currentHubId ? esc(hubName(v.currentHubId)) : 'Ngoài Hub'}<span class="sub">${esc(v.parkingSpaceId || 'Chưa có vị trí đỗ')}</span></td><td>${battery(v.batteryLevel)}<span class="sub">${esc(label(v.status))}</span></td><td><div class="actions">${v.parkingSpaceId ? button('Lấy xe', 'parking-checkout', v.id, 'secondary small') + button('Xem sạc', 'go', 'charging', 'ghost small') : button('Đặt chỗ đỗ', 'parking-new', '', 'primary small')}</div></td></tr>`,
+        ),
+      ),
+    ) +
+    panel(
+      'Lịch sử gửi xe',
+      'Mỗi lượt gửi có thời điểm vào và ra',
+      visits.length
         ? table(
-            ['Xe / cổng', 'Thời điểm', 'Pin mục tiêu', 'Trạng thái'],
-            completed.map(
-              (c) =>
-                `<tr><td>${esc(vehicleName(c.vehicleId))}<span class="sub">${esc(c.portId)}</span></td><td>${date(c.startedAt)}<span class="sub">Kết thúc ${date(c.endedAt)}</span></td><td>${c.targetBattery}%</td><td>${badge(c.status)}</td></tr>`,
+            ['Xe', 'Hub / vị trí', 'Vào lúc', 'Ra lúc'],
+            visits.map(
+              (v) =>
+                `<tr><td>${esc(vehicleName(v.vehicleId))}</td><td>${esc(hubName(v.hubId))}<span class="sub">${esc(v.spaceId)}</span></td><td>${date(v.enteredAt)}</td><td>${v.exitedAt ? date(v.exitedAt) : '<span class="badge blue">Đang gửi</span>'}</td></tr>`,
             ),
           )
-        : empty('Lịch sử còn trống', 'Các phiên sạc kết thúc sẽ được hiển thị tại đây.'),
-    )}`
+        : empty('Chưa có lịch sử gửi xe', 'Xác nhận đỗ xe để bắt đầu lượt gửi.'),
+    )
   );
 }
+function notificationsView() {
+  const rows = d().notifications;
+  return (
+    heading(
+      'Thông báo',
+      'Cập nhật về cổng sạc, chuyến đi và phương tiện của bạn.',
+      button('Đánh dấu đã đọc', 'notifications-read', '', 'secondary'),
+    ) +
+    panel(
+      'Cập nhật gần đây',
+      'Thông báo được giữ trong phiên chạy của hệ thống',
+      rows.length
+        ? `<div class="notification-list">${rows.map((n) => `<article class="notification-item ${n.readAt ? '' : 'unread'}"><div><h3>${esc(n.title)}</h3><p>${esc(n.message)}</p><time>${date(n.createdAt)}</time></div>${!n.readAt ? button('Đã đọc', 'notification-read', n.id, 'ghost small') : ''}</article>`).join('')}</div>`
+        : empty(
+            'Chưa có thông báo',
+            'Hệ thống sẽ báo khi được cấp cổng, đạt pin mục tiêu hoặc hoàn tất dịch vụ.',
+          ),
+    )
+  );
+}
+function chargingView() {
+  const sessions = d().chargingSessions;
+  const live = sessions.filter((c) => ['ACTIVE', 'AWAITING_DISCONNECT'].includes(c.status));
+  const queue = d()
+    .reservations.filter((r) => r.kind === 'CHARGING' && ['WAITING', 'HELD'].includes(r.status))
+    .sort(
+      (a, b) =>
+        (a.requiredBy ?? Infinity) - (b.requiredBy ?? Infinity) ||
+        (find('vehicles', a.vehicleId)?.batteryLevel ?? 100) -
+          (find('vehicles', b.vehicleId)?.batteryLevel ?? 100) ||
+        a.createdAt - b.createdAt,
+    );
+  const completed = sessions
+    .filter((c) => ['COMPLETED', 'CANCELLED'].includes(c.status))
+    .sort((a, b) => b.endedAt - a.endedAt);
+  const operating = role() === 'OPERATOR';
+  return (
+    heading(
+      operating ? 'Điều hành sạc' : 'Sạc xe',
+      'Theo dõi yêu cầu, cấp cổng và tiến trình sạc.',
+      button(operating ? 'Sạc xe dùng chung' : 'Yêu cầu sạc', 'charge-new', '', 'primary'),
+    ) +
+    `<div class="cards">${stat('Đang cấp điện', live.filter((c) => c.status === 'ACTIVE').length, '', 'Cập nhật pin theo công suất')}${stat('Đang chờ cổng', queue.filter((r) => r.status === 'WAITING').length, '', 'Phân bổ theo thời điểm cần xe và pin')}${stat('Chờ ngắt kết nối', live.filter((c) => c.status === 'AWAITING_DISCONNECT').length, '', 'Cổng chưa thể cấp cho xe khác')}${stat('Đã kết thúc', completed.length, '', 'Bao gồm hoàn tất và dừng trước mục tiêu')}</div>` +
+    (operating
+      ? panel(
+          'Nguồn lực sạc',
+          'Cổng trống còn cần đủ ngân sách công suất',
+          table(
+            ['Hub', 'Cổng trống', 'Công suất cam kết / giới hạn'],
+            d().hubs.map(
+              (h) =>
+                `<tr><td>${esc(h.name)}</td><td>${h.freePorts}</td><td>${Number(h.chargingUsedKw).toFixed(1)} / ${h.chargingBudgetKw} kW</td></tr>`,
+            ),
+          ),
+        )
+      : '') +
+    panel(
+      'Phiên đang phục vụ',
+      'Đạt mục tiêu hoặc dừng sạc → xác nhận ngắt kết nối → giải phóng cổng',
+      live.length
+        ? table(
+            ['Xe / Hub', 'Tiến trình', 'Trạng thái', 'Thao tác'],
+            live.map((c) => {
+              const v = find('vehicles', c.vehicleId);
+              const r = find('reservations', c.reservationId);
+              return `<tr><td><strong>${esc(vehicleName(c.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${esc(c.portId)}</span></td><td>${battery(v.batteryLevel, c.targetBattery)}<span class="sub">Bắt đầu ${date(c.startedAt)}</span></td><td>${badge(c.status)}</td><td>${c.status === 'ACTIVE' ? button('Dừng sạc', 'charge-stop', c.id, 'secondary small') : button('Ngắt kết nối', 'charge-disconnect', c.id, 'primary small')}</td></tr>`;
+            }),
+          )
+        : empty('Chưa có phiên đang phục vụ', 'Gửi yêu cầu và bắt đầu sau khi được cấp cổng.'),
+    ) +
+    panel(
+      'Hàng đợi và cổng đã cấp',
+      'Ưu tiên thời điểm cần xe sớm hơn → pin thấp hơn → yêu cầu đến trước',
+      queue.length
+        ? table(
+            ['Thứ tự', 'Xe / Hub', 'Cần xe trước', 'Trạng thái / lý do', 'Thao tác'],
+            queue.map(
+              (r, i) =>
+                `<tr><td>${i + 1}</td><td><strong>${esc(vehicleName(r.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${Math.round(find('vehicles', r.vehicleId)?.batteryLevel ?? 0)}%</span></td><td>${r.requiredBy ? date(r.requiredBy) : 'Không khai báo'}</td><td>${badge(r.status)}<span class="sub">${esc(r.waitingReason || r.portId || '')}${r.status === 'HELD' ? ` · ${countdown(r)}` : ''}</span></td><td><div class="actions">${r.status === 'HELD' ? button('Bắt đầu sạc', 'charge-start', r.id, 'primary small') : ''}${r.userId === d().user.id ? button('Hủy', 'reservation-cancel', r.id, 'ghost small') : ''}</div></td></tr>`,
+            ),
+          )
+        : empty('Không có yêu cầu chờ', 'Yêu cầu mới sẽ xuất hiện tại đây.'),
+    ) +
+    panel(
+      'Lịch sử sạc',
+      'Cổng chỉ được giải phóng sau khi xác nhận ngắt kết nối',
+      completed.length
+        ? table(
+            ['Xe / cổng', 'Mục tiêu', 'Kết thúc', 'Kết quả'],
+            completed.map(
+              (c) =>
+                `<tr><td>${esc(vehicleName(c.vehicleId))}<span class="sub">${esc(c.portId)}</span></td><td>${c.targetBattery}%</td><td>${date(c.endedAt)}</td><td>${c.stopReason === 'MANUAL' ? 'Dừng theo yêu cầu' : 'Đạt mục tiêu'}</td></tr>`,
+            ),
+          )
+        : empty('Chưa có phiên kết thúc', 'Các phiên đã ngắt kết nối sẽ được hiển thị tại đây.'),
+    )
+  );
+}
+
 function incidentTable(rows) {
   if (!rows.length)
     return empty(
@@ -406,45 +528,96 @@ function dispatchView() {
     `<div class="toolbar">${select('dispatchStatus', option('', 'Tất cả trạng thái', state.dispatchStatus) + ['PENDING', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED'].map((v) => option(v, label(v), state.dispatchStatus)).join(''), 'id="dispatch-filter" aria-label="Trạng thái lệnh"')}<span class="small muted">${rows.length} lệnh điều phối</span></div>${panel('Danh sách lệnh', 'Xe nguồn và chỗ tiếp nhận được giữ theo từng lệnh', dispatchTable(rows))}`
   );
 }
+function scenarioParameter(type, value = 2) {
+  if (type === 'HUB_FULL')
+    return '<div class="notice">Giả định chuyển xe hợp lệ từ Hub khác để lấp chỗ trống. Số xe toàn mạng lưới được giữ nguyên.</div>';
+  const props = ['DEMAND_SURGE', 'CHARGING_SURGE'].includes(type)
+    ? ['Hệ số tăng nhu cầu', 1, 3, 0.5]
+    : type === 'PORT_FAILURE'
+      ? ['Số cổng bị ảnh hưởng', 1, 20, 1]
+      : ['Số xe tập trung thêm', 1, 20, 1];
+  return field(
+    'parameter',
+    props[0],
+    input(
+      'parameter',
+      'number',
+      value,
+      `required min="${props[1]}" max="${props[2]}" step="${props[3]}"`,
+    ),
+  );
+}
 function whatIfView() {
-  const result = state.result;
   const f = state.scenarioForm || {
     type: 'DEMAND_SURGE',
-    targetHubId: 'hub-a',
+    targetHubId: 'hub-metro',
     parameter: 2,
     horizonMinutes: 60,
     seed: 42,
   };
-  const pdef = ['DEMAND_SURGE', 'CHARGING_SURGE'].includes(f.type)
-    ? ['Hệ số tăng nhu cầu', 1, 10, 0.1]
-    : f.type === 'HUB_FULL'
-      ? ['Số xe dự kiến đến thêm', 0, 100, 1]
-      : f.type === 'PORT_FAILURE'
-        ? ['Số cổng ngừng hoạt động', 0, 100, 1]
-        : ['Số xe giảm tại Hub', 0, 100, 1];
   return (
-    heading('Mô phỏng What-if', 'Thử một giả định trước khi đưa ra quyết định vận hành.') +
-    `<div class="split"><section class="panel"><div class="panel-head"><div><h2>Thiết lập kịch bản</h2><p>Chọn tình huống và nguồn lực cần phân tích</p></div>${icon('flask')}</div><form id="whatif-form" class="panel-body">${field('type', 'Loại kịch bản', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field(
-      'targetHubId',
-      'Hub được khảo sát',
-      select(
-        'targetHubId',
-        d()
-          .hubs.filter((h) => h.status === 'ACTIVE')
-          .map((h) => option(h.id, h.name, f.targetHubId))
-          .join(''),
-      ),
-    )}<div id="scenario-param">${field('parameter', pdef[0], input('parameter', 'number', f.parameter, `required min="${pdef[1]}" max="${pdef[2]}" step="${pdef[3]}"`))}</div><div class="form-grid">${field('horizonMinutes', 'Khoảng dự báo (phút)', input('horizonMinutes', 'number', f.horizonMinutes, 'required min="1" max="1440" step="1"'))}${field('seed', 'Seed mô phỏng', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Cùng đầu vào và seed giúp tái hiện kết quả.')}</div><div class="notice">${icon('shield')}Kịch bản chạy độc lập với trạng thái đang vận hành. Kết quả dùng để hỗ trợ quyết định.</div><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">${icon('flask')}Chạy mô phỏng</button></form></section><div>${result ? renderResult(result) : panel('Kết quả phân tích', 'Các chỉ số và khuyến nghị của kịch bản', empty('Sẵn sàng khám phá tình huống', 'Thiết lập một kịch bản bên trái để xem nguồn lực có thể thay đổi như thế nào.'))}</div></div>`
+    heading(
+      'Phân tích What-if',
+      'Khảo sát tác động và kiểm tra phương án điều phối trước khi quyết định.',
+    ) +
+    `<div class="whatif-layout"><section class="panel scenario-panel"><div class="panel-head"><div><h2>Thiết lập tình huống</h2><p>Dữ liệu mô phỏng theo bước 5 phút</p></div></div><form id="whatif-form" class="panel-body">${field('type', 'Tình huống', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field('targetHubId', 'Hub được khảo sát', select('targetHubId', hubOptions(f.targetHubId)))}<div id="scenario-param">${scenarioParameter(f.type, f.parameter)}</div>${field('horizonMinutes', 'Khoảng khảo sát', select('horizonMinutes', [30, 60, 120].map((v) => option(String(v), `${v} phút`, String(f.horizonMinutes))).join('')))}<details class="model-details"><summary>Thiết lập tái hiện</summary>${field('seed', 'Seed', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Cùng trạng thái, tham số và seed cho cùng chỉ số.')}</details><p class="metric-note">Chạy trên bản sao mạng lưới. Kết quả không tự tạo lệnh hoặc thay đổi dữ liệu vận hành.</p><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">Chạy mô phỏng</button></form></section><div class="analysis-content">${state.result ? renderResult(state.result) : panel('Kết quả phân tích', 'So sánh điều kiện bình thường, tình huống và phương án thử nghiệm', empty('Chọn tình huống để bắt đầu', 'Hệ thống tính nhu cầu theo thời gian, kiểm tra xe và chỗ tiếp nhận, rồi đánh giá phương án khả thi.'))}</div></div>`
   );
 }
+
 function renderResult(r) {
-  const m = r.metrics;
+  const c = r.comparison;
+  const rows = [
+    ['Yêu cầu thuê', 'requestedTrips'],
+    ['Lượt được phục vụ', 'servedTrips'],
+    ['Lượt chưa phục vụ', 'unservedTrips'],
+    ['Bị chặn do thiếu chỗ trả', 'blockedReturns'],
+    ['Yêu cầu sạc còn chờ', 'waitingCharges'],
+    ['Chờ sạc lớn nhất (phút)', 'maxChargeWaitMinutes'],
+    ['Sạc không kịp thời điểm cần xe', 'lateCharges'],
+    ['Yêu cầu sạc hết hạn', 'expiredCharges'],
+    ['Phiên đạt pin mục tiêu', 'completedCharges'],
+  ];
+  const last = r.timeline.at(-1);
   return panel(
     'Kết quả phân tích',
-    `${label(state.scenarioForm?.type)} · ${hubName(state.scenarioForm?.targetHubId)} · ${date(r.generatedAt)}`,
-    `<div class="panel-body"><p class="metric-note">Ước tính theo mô hình quy tắc của bản demo, trong ${m.horizonMinutes} phút giả định.</p><div class="result-grid">${stat('Xe khả dụng dự kiến', m.availableVehicles, 'bike', `Hiện trạng: ${m.baselineVehicles} xe`)}${stat('Nhu cầu dự kiến', m.predictedDemand, 'route', 'Lượt sử dụng trong khoảng khảo sát')}${stat('Nhu cầu chưa đáp ứng', m.estimatedUnserved, 'alert', 'Chênh lệch với nguồn xe')}${stat('Mức sử dụng chỗ đỗ', m.parkingOccupancy + '%', 'parking', `${m.availablePorts} cổng còn khả dụng`)}</div><div style="margin-top:23px"><h3>Khuyến nghị vận hành</h3>${r.recommendations.map((t) => `<div class="recommendation">${icon('arrowUp')}<span>${esc(t)}</span></div>`).join('')}</div><div class="notice" style="margin:15px 0 0">Yêu cầu sạc có thể chờ: <strong>${m.waitingCharges}</strong>. Kết quả không tự tạo lệnh điều phối hoặc đổi lịch sạc.</div></div>`,
+    `${label(state.scenarioForm?.type)} · ${hubName(state.scenarioForm?.targetHubId)} · ${r.metrics.horizonMinutes} phút`,
+    `<div class="panel-body"><div class="analysis-outcome"><span class="badge ${c.improved ? 'good' : 'blue'}">${c.improved ? 'Phương án cải thiện lượt phục vụ' : 'Cần xem xét tác động'}</span><span class="muted small">${date(r.generatedAt)} · ${r.metrics.totalVehicles} xe trong mô hình</span></div><p class="metric-note">${r.effects.map(esc).join(' ')}</p><div class="result-grid">${stat('Yêu cầu trong tình huống', c.scenario.requestedTrips, '', 'Lượt thuê trong toàn khoảng khảo sát')}${stat('Chưa phục vụ trước / sau', `${c.scenario.unservedTrips} / ${c.coordinated.unservedTrips}`, '', 'Tính từ hai lượt chạy độc lập')}${stat('Phương án được thử', r.actions.length, '', 'Có nguồn, đích và thời điểm cụ thể')}${stat('Sạc trễ mốc cần xe', c.scenario.lateCharges, '', 'Không bảo đảm mọi yêu cầu đều được đáp ứng')}</div></div>` +
+      table(
+        ['Chỉ số', 'Bình thường', 'Có tình huống', 'Có phương án'],
+        rows.map(
+          ([name, key]) =>
+            `<tr><td>${esc(name)}</td><td>${c.baseline[key]}</td><td>${c.scenario[key]}</td><td>${c.coordinated[key]}</td></tr>`,
+        ),
+      ) +
+      `<div class="panel-body"><h3>Khuyến nghị vận hành</h3><p class="metric-note">Xe điều phối chỉ sẵn sàng sau thời điểm đến. Không tự áp dụng vào hệ thống.</p>${
+        r.actions.length
+          ? table(
+              ['Phương án', 'Số xe', 'Thời điểm'],
+              r.actions.map(
+                (a) =>
+                  `<tr><td><strong>${a.type === 'RELOCATE' ? 'Điều chuyển' : 'Chuyển hướng'}: ${esc(hubName(a.fromHubId))} → ${esc(hubName(a.toHubId))}</strong><span class="sub">${esc(a.reason)}</span></td><td>${a.quantity}</td><td>Phút ${a.departMinute} → ${a.arrivalMinute}</td></tr>`,
+              ),
+            )
+          : ''
+      }${r.recommendations
+        .filter((t) => !t.startsWith('Chuyển ') && !t.startsWith('Hướng '))
+        .map((t) => `<p class="recommendation">${esc(t)}</p>`)
+        .join('')}<details class="model-details"><summary>Diễn biến và sức chứa</summary>${table(
+        ['Phút', 'Xe sẵn sàng', 'Lượt chưa phục vụ tích lũy', 'Chờ cấp cổng'],
+        r.timeline.map(
+          (f) =>
+            `<tr><td>${f.minute}</td><td>${f.availableVehicles}</td><td>${f.unservedTrips}</td><td>${f.waitingCharges}</td></tr>`,
+        ),
+      )}<h3 style="margin:18px 0 10px">Trạng thái Hub cuối kỳ, chưa áp dụng phương án</h3>${table(
+        ['Hub', 'Xe sẵn sàng', 'Đang đỗ + đã giữ / sức chứa', 'Cổng trống / lỗi'],
+        last.hubs.map(
+          (h) =>
+            `<tr><td>${esc(hubName(h.hubId))}</td><td>${h.availableVehicles}</td><td>${h.occupiedSpaces} + ${h.heldSpaces} / ${h.capacity}</td><td>${h.freePorts} / ${h.faultPorts}</td></tr>`,
+        ),
+      )}</details><details class="model-details"><summary>Giả định và giới hạn mô hình</summary><ul class="assumptions">${r.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details></div>`,
   );
 }
+
 function demoView() {
   const resources = [
     ...d().vehicles.map((v) => option('VEHICLE|' + v.id, vehicleName(v.id))),
@@ -462,7 +635,7 @@ function profileView() {
   const u = d().user;
   return (
     heading('Hồ sơ cá nhân', 'Thông tin tài khoản và liên hệ của bạn.') +
-    `<div class="profile-wrap">${panel('Thông tin cá nhân', 'Quản lý họ tên, email và số điện thoại', `<form id="profile-form" class="panel-body"><div class="profile-heading"><span class="avatar">${esc(initials(u.fullName))}</span><div><h3>${esc(u.fullName)}</h3><span class="muted small">${esc(label(u.role))}</span></div></div>${field('fullName', 'Họ và tên', input('fullName', 'text', u.fullName, 'required maxlength="80" autocomplete="name"'))}<div class="form-grid">${field('email', 'Email', input('email', 'email', u.email || '', 'maxlength="200" autocomplete="email"'))}${field('phone', 'Số điện thoại', input('phone', 'tel', u.phone || '', 'pattern="[+]?[0-9]{9,15}" autocomplete="tel"'))}</div><div id="profile-error" class="form-error" role="alert" hidden></div><button class="btn primary" type="submit">Lưu thay đổi${icon('check')}</button></form>`)}</div>`
+    `<div class="profile-wrap">${panel('Thông tin cá nhân', 'Quản lý họ tên, email và số điện thoại', `<form id="profile-form" class="panel-body"><div class="profile-heading"><span class="avatar">${esc(initials(u.fullName))}</span><div><h3>${esc(u.fullName)}</h3><span class="muted small">${esc(label(u.role))}</span></div></div>${field('fullName', 'Họ và tên', input('fullName', 'text', u.fullName, 'required maxlength="80" autocomplete="name"'))}<div class="form-grid">${field('email', 'Email', input('email', 'email', u.email || '', 'maxlength="200" autocomplete="email"'))}${field('phone', 'Số điện thoại', input('phone', 'tel', u.phone || '', 'pattern="[+]?[0-9]{9,15}" autocomplete="tel"'))}</div><div id="profile-error" class="form-error" role="alert" hidden></div><button class="btn primary" type="submit">Lưu thay đổi</button></form>`)}</div>`
   );
 }
 function render() {
@@ -474,6 +647,8 @@ function render() {
     reservations: reservationsView,
     rentals: rentalsView,
     charging: chargingView,
+    vehicles: vehiclesView,
+    notifications: notificationsView,
     incidents: incidentsView,
     dispatch: dispatchView,
     'what-if': whatIfView,
@@ -523,17 +698,17 @@ async function hubDetail(id) {
   const h = await api('/hubs/' + encodeURIComponent(id));
   modal(
     h.name,
-    `<div class="modal-summary"><span class="hub-symbol" style="margin:0">${icon('building')}</span><div>${badge(h.status)}<p class="muted small" style="margin-top:5px">Giờ hoạt động: ${esc(h.openingHours)} · ${h.freeSpaces} chỗ trống · ${h.freePorts} cổng sạc</p></div></div><h3 style="margin-bottom:12px">Xe dùng chung tại Hub</h3>${
+    `<div class="modal-summary"><div>${badge(h.status)}<p class="muted small" style="margin-top:5px">Giờ hoạt động: ${esc(h.openingHours)} · ${h.freeSpaces} chỗ trống · ${h.freePorts} cổng sạc</p></div></div><h3 style="margin-bottom:12px">Xe dùng chung tại Hub</h3>${
       h.vehicles.length
         ? table(
             ['Phương tiện', 'Pin', 'Trạng thái', ''],
             h.vehicles.map(
               (v) =>
-                `<tr><td><span class="table-primary">${esc(v.code)}</span><span class="sub">${esc(label(v.type))}</span></td><td>${battery(v.batteryLevel)}</td><td>${badge(v.status)}</td><td>${role() === 'CUSTOMER' && v.status === 'AVAILABLE' && v.batteryLevel >= d().policy.minBattery && h.status === 'ACTIVE' ? button('Giữ xe', 'reserve-vehicle', v.id, 'primary small') : ''}</td></tr>`,
+                `<tr><td><span class="table-primary">${esc(v.code)}</span><span class="sub">${esc(label(v.type))}</span></td><td>${battery(v.batteryLevel)}</td><td>${v.status === 'AVAILABLE' && !v.rentable ? `<span class="badge muted">${v.batteryLevel < d().policy.minBattery ? 'Pin thấp' : 'Đang chờ sạc'}</span>` : badge(v.status)}</td><td>${role() === 'CUSTOMER' && v.rentable ? button('Giữ xe', 'reserve-vehicle', v.id, 'primary small') : ''}</td></tr>`,
             ),
           )
         : empty('Chưa có xe tại Hub', 'Bạn có thể chọn Hub khác.')
-    }<h3 style="margin:22px 0 12px">Chỗ đỗ</h3><div class="space-grid">${h.spaces.map((p) => `<div class="space-cell ${p.status === 'FREE' ? 'free' : ''}"><strong>${esc(p.id.split('-').at(-1).toUpperCase())}</strong><br>${esc(label(p.status))}</div>`).join('')}</div><h3 style="margin:22px 0 12px">Cổng sạc</h3>${h.ports.map((p) => `<div class="list-row"><div class="list-title">${icon('bolt')}<div><p>${esc(p.id)}</p><small>${p.powerKw} kW</small></div></div>${badge(p.status)}</div>`).join('')}`,
+    }<h3 style="margin:22px 0 12px">Chỗ đỗ</h3><div class="space-grid">${h.spaces.map((p) => `<div class="space-cell ${p.status === 'FREE' ? 'free' : ''}"><strong>${esc(p.id.split('-').at(-1).toUpperCase())}</strong><br>${esc(label(p.status))}</div>`).join('')}</div><h3 style="margin:22px 0 12px">Cổng sạc</h3>${h.ports.map((p) => `<div class="list-row"><div class="list-title"><div><p>${esc(p.id)}</p><small>${p.powerKw} kW</small></div></div>${badge(p.status)}</div>`).join('')}`,
   );
 }
 function parkingForm() {
@@ -569,34 +744,41 @@ function parkingForm() {
   form.elements.hubId.onchange = () => bindHubSpaces(form, form.elements.hubId.value);
 }
 function chargeForm() {
+  const operating = role() === 'OPERATOR';
   const vehicles = d().vehicles.filter(
     (v) =>
-      v.ownership === 'PERSONAL' &&
-      v.ownerId === d().user.id &&
+      (operating
+        ? v.ownership === 'SHARED'
+        : v.ownership === 'PERSONAL' && v.ownerId === d().user.id) &&
       v.currentHubId &&
       v.parkingSpaceId &&
-      v.status !== 'CHARGING',
+      v.status === 'AVAILABLE' &&
+      v.batteryLevel < 100 &&
+      !d().reservations.some((r) => r.vehicleId === v.id && ['WAITING', 'HELD'].includes(r.status)),
   );
   if (!vehicles.length)
     return modal(
       'Yêu cầu sạc',
       empty(
-        'Không có xe phù hợp',
-        'Xe cá nhân cần đang đỗ tại Hub và chưa có phiên sạc đang chạy.',
+        'Chưa có xe phù hợp',
+        'Xe cần đang đỗ tại Hub, chưa có yêu cầu sạc và không bị chiếm dụng.',
       ),
     );
   modal(
-    'Yêu cầu sạc',
+    operating ? 'Sạc xe dùng chung' : 'Yêu cầu sạc',
     field(
       'vehicleId',
       'Xe cần sạc',
       select(
         'vehicleId',
-        vehicles.map((v) => option(v.id, `${v.code} · ${Math.round(v.batteryLevel)}%`)).join(''),
+        vehicles
+          .map((v) =>
+            option(v.id, `${v.code} · ${Math.round(v.batteryLevel)}% · ${hubName(v.currentHubId)}`),
+          )
+          .join(''),
       ),
     ) +
       `<div id="charge-hub" class="notice"></div>` +
-      field('portId', 'Cổng sạc', select('portId', '')) +
       field(
         'targetBattery',
         'Mức pin mục tiêu (%)',
@@ -606,16 +788,16 @@ function chargeForm() {
         'requiredBy',
         'Thời điểm cần xe (tùy chọn)',
         input('requiredBy', 'datetime-local'),
-        'Hệ thống dùng thời điểm này để ưu tiên yêu cầu đang chờ.',
-      ),
+        'Dùng để xếp ưu tiên; không bảo đảm sạc xong đúng thời điểm này.',
+      ) +
+      '<p class="small muted">Cổng được phân bổ tự động theo hàng đợi và công suất. Bạn sẽ nhận thông báo khi đến lượt.</p>',
     async (data) => {
       const v = vehicles.find((v) => v.id === data.vehicleId);
       await api('/charging/requests', {
         method: 'POST',
         body: {
-          vehicleId: data.vehicleId,
+          vehicleId: v.id,
           hubId: v.currentHubId,
-          portId: data.portId || undefined,
           targetBattery: Number(data.targetBattery),
           requiredBy: data.requiredBy ? new Date(data.requiredBy).getTime() : undefined,
         },
@@ -627,19 +809,15 @@ function chargeForm() {
   const form = document.querySelector('#dialog-form');
   const update = () => {
     const v = vehicles.find((v) => v.id === form.elements.vehicleId.value);
-    document.querySelector('#charge-hub').textContent = 'Xe đang đỗ tại ' + hubName(v.currentHubId);
-    form.elements.portId.innerHTML =
-      option('', 'Tự động phân bổ') +
-      d()
-        .ports.filter((p) => p.hubId === v.currentHubId && p.status === 'FREE')
-        .map((p) => option(p.id, `${p.id} · ${p.powerKw} kW`))
-        .join('');
+    document.querySelector('#charge-hub').textContent =
+      `Xe đang đỗ tại ${hubName(v.currentHubId)}. Pin hiện tại ${Math.round(v.batteryLevel)}%.`;
     form.elements.targetBattery.min = Math.floor(v.batteryLevel) + 1;
     form.elements.targetBattery.value = Math.min(100, Math.max(80, Math.ceil(v.batteryLevel) + 1));
   };
   update();
   form.elements.vehicleId.onchange = update;
 }
+
 function dispatchForm(order) {
   modal(
     order ? 'Chỉnh sửa lệnh điều phối' : 'Tạo lệnh điều phối',
@@ -699,34 +877,114 @@ function incidentForm() {
   update();
   form.elements.kind.onchange = update;
 }
+function reserveVehicleForm(id) {
+  const v = find('vehicles', id);
+  const hubs = d().hubs.filter((h) => h.status === 'ACTIVE' && h.freeSpaces > 0);
+  if (!hubs.length)
+    return modal(
+      'Đặt xe',
+      empty('Chưa có Hub nhận trả phù hợp', 'Hãy thử lại khi có chỗ tiếp nhận.'),
+    );
+  const selected = hubs.find((h) => h.id !== v.currentHubId)?.id || hubs[0].id;
+  modal(
+    'Đặt xe cho hành trình',
+    `<div class="modal-summary"><div><h3>${esc(v.code)}</h3><p class="muted">Nhận tại ${esc(hubName(v.currentHubId))} · Pin ${Math.round(v.batteryLevel)}%</p></div></div>` +
+      field(
+        'returnHubId',
+        'Hub trả xe',
+        select(
+          'returnHubId',
+          hubs.map((h) => option(h.id, `${h.name} · ${h.freeSpaces} chỗ trống`, selected)).join(''),
+        ),
+      ) +
+      `<div class="notice">Xe được giữ ${d().policy.holdMinutes} phút để đến nhận. Một chỗ trả được giữ ở Hub đích cho đến khi kết thúc chuyến đi.</div><p class="small muted">Phí thuê ${money(d().policy.pricePerMinute)}/phút. Trả đúng Hub đăng ký không bị phạt. Bạn có thể đổi Hub trả khi đích mới còn chỗ.</p>`,
+    async (f) => {
+      await api('/reservations/vehicle', {
+        method: 'POST',
+        body: { vehicleId: id, returnHubId: f.returnHubId },
+      });
+      await changed('Đã giữ xe và chỗ trả tại Hub đích.', 'reservations');
+    },
+    'Giữ xe 15 phút',
+  );
+}
+function destinationForm(reservationId) {
+  const r = find('reservations', reservationId);
+  const hubs = d().hubs.filter(
+    (h) => h.status === 'ACTIVE' && (h.freeSpaces > 0 || h.id === r.plannedReturnHubId),
+  );
+  modal(
+    'Đổi Hub trả',
+    field(
+      'hubId',
+      'Hub trả mới',
+      select(
+        'hubId',
+        hubs
+          .map((h) => option(h.id, `${h.name} · ${h.freeSpaces} chỗ trống`, r.plannedReturnHubId))
+          .join(''),
+      ),
+    ) +
+      '<div class="notice">Hệ thống giữ chỗ mới trước khi giải phóng chỗ cũ. Đổi thành công thì Hub mới trở thành nơi trả hợp lệ.</div>',
+    async (f) => {
+      await api('/reservations/' + reservationId + '/destination', { method: 'POST', body: f });
+      await changed('Đã cập nhật Hub trả và chỗ tiếp nhận.');
+    },
+    'Xác nhận đổi',
+  );
+}
 function returnForm(r) {
   modal(
-    'Trả xe tại Hub',
-    `<div class="modal-summary">${icon('bike')}<strong>${esc(vehicleName(r.vehicleId))}</strong><span class="muted">Nhận tại ${esc(hubName(r.pickupHubId))}</span></div>` +
-      field('hubId', 'Hub trả xe', select('hubId', hubOptions(r.pickupHubId))) +
-      field('spaceId', 'Vị trí đỗ trống', select('spaceId', '')) +
-      `<label class="checkbox"><input type="checkbox" name="simulate" checked>Đặt vị trí xe trong bộ mô phỏng tại Hub đã chọn trước khi xác nhận.</label><div class="notice">Phí sử dụng ${money(d().policy.pricePerMinute)}/phút. Trả khác Hub nhận có khoản phạt ${money(d().policy.wrongHubPenalty)}.</div>`,
-    async (data) => {
-      if (data.simulate)
-        await api('/demo/telemetry', {
-          method: 'POST',
-          body: { vehicleId: r.vehicleId, hubId: data.hubId },
-        });
+    'Xác nhận trả xe',
+    `<div class="modal-summary"><div><h3>${esc(vehicleName(r.vehicleId))}</h3><p class="muted">Nơi trả đã đăng ký: ${esc(hubName(r.plannedReturnHubId))}</p></div></div>` +
+      field('hubId', 'Hub đang trả xe', select('hubId', hubOptions(r.plannedReturnHubId))) +
+      field('spaceId', 'Vị trí đỗ', select('spaceId', '')) +
+      '<div id="return-policy" class="notice"></div><label class="checkbox"><input type="checkbox" name="arrived" required>Tôi xác nhận xe đã đến Hub và vào đúng vị trí được chọn.</label><p class="small muted">Trong môi trường demo, xác nhận đến nơi cung cấp sự kiện vị trí mô phỏng.</p>',
+    async (f) => {
+      await api('/demo/telemetry', {
+        method: 'POST',
+        body: { vehicleId: r.vehicleId, hubId: f.hubId },
+      });
       const result = await api('/rentals/' + r.id + '/return', {
         method: 'POST',
-        body: { hubId: data.hubId, spaceId: data.spaceId },
+        body: { hubId: f.hubId, spaceId: f.spaceId },
       });
       await changed(
-        `Đã trả xe. Tổng phí và phạt: ${money(result.fee + result.penalty)}.`,
+        `Đã trả xe. Phí sử dụng ${money(result.fee)}, phạt ${money(result.penalty)}.`,
         'rentals',
       );
     },
     'Xác nhận trả xe',
   );
   const form = document.querySelector('#dialog-form');
-  bindHubSpaces(form, form.elements.hubId.value);
-  form.elements.hubId.onchange = () => bindHubSpaces(form, form.elements.hubId.value);
+  const update = () => {
+    const hubId = form.elements.hubId.value;
+    const spaces = d().spaces.filter(
+      (p) =>
+        p.hubId === hubId &&
+        (p.status === 'FREE' || (p.id === r.plannedReturnSpaceId && p.status === 'HELD')),
+    );
+    form.elements.spaceId.innerHTML = spaces.length
+      ? spaces
+          .map((p) =>
+            option(
+              p.id,
+              p.id + (p.id === r.plannedReturnSpaceId ? ' · Đã giữ cho bạn' : ''),
+              r.plannedReturnSpaceId,
+            ),
+          )
+          .join('')
+      : option('', 'Không còn chỗ tiếp nhận');
+    form.elements.spaceId.disabled = !spaces.length;
+    document.querySelector('#return-policy').textContent =
+      hubId === r.plannedReturnHubId
+        ? 'Trả đúng Hub đăng ký. Không phát sinh phạt trả sai Hub.'
+        : `Bạn đang trả khác Hub đã đăng ký. Khoản phạt dự kiến ${money(d().policy.wrongHubPenalty)}. Có thể quay lại đổi Hub trả trước khi xác nhận.`;
+  };
+  update();
+  form.elements.hubId.onchange = update;
 }
+
 function bindForms() {
   document.querySelector('#hub-search')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -756,35 +1014,20 @@ function bindForms() {
     render();
   });
   document.querySelector('#scenario-type')?.addEventListener('change', (e) => {
-    const t = e.target.value;
-    const props = ['DEMAND_SURGE', 'CHARGING_SURGE'].includes(t)
-      ? ['Hệ số tăng nhu cầu', 2, 1, 10, 0.1]
-      : t === 'HUB_FULL'
-        ? ['Số xe dự kiến đến thêm', 5, 0, 100, 1]
-        : t === 'PORT_FAILURE'
-          ? ['Số cổng ngừng hoạt động', 1, 0, 100, 1]
-          : ['Số xe giảm tại Hub', 2, 0, 100, 1];
-    document.querySelector('#scenario-param').innerHTML = field(
-      'parameter',
-      props[0],
-      input(
-        'parameter',
-        'number',
-        props[1],
-        `required min="${props[2]}" max="${props[3]}" step="${props[4]}"`,
-      ),
-    );
+    const type = e.target.value;
+    const form = document.querySelector('#whatif-form');
+    const value = type === 'PORT_FAILURE' ? 1 : type === 'VEHICLE_IMBALANCE' ? 3 : 2;
+    document.querySelector('#scenario-param').innerHTML = scenarioParameter(type, value);
+    form.elements.targetHubId.value = type === 'DEMAND_SURGE' ? 'hub-metro' : 'hub-a';
   });
   document.querySelector('#whatif-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     const key = ['DEMAND_SURGE', 'CHARGING_SURGE'].includes(f.type)
       ? 'multiplier'
-      : f.type === 'HUB_FULL'
-        ? 'additionalVehicles'
-        : f.type === 'PORT_FAILURE'
-          ? 'failedPorts'
-          : 'vehicleLoss';
+      : f.type === 'PORT_FAILURE'
+        ? 'failedPorts'
+        : 'additionalVehicles';
     const submit = e.target.querySelector('[type=submit]');
     submit.disabled = true;
     const error = document.querySelector('#whatif-error');
@@ -796,7 +1039,7 @@ function bindForms() {
         body: {
           type: f.type,
           targetHubId: f.targetHubId,
-          parameters: { [key]: Number(f.parameter) },
+          parameters: f.type === 'HUB_FULL' ? {} : { [key]: Number(f.parameter) },
           horizonMinutes: Number(f.horizonMinutes),
           seed: Number(f.seed),
         },
@@ -864,16 +1107,8 @@ const handlers = {
     state.hubResults = null;
     render();
   },
-  'reserve-vehicle': (id) =>
-    confirm(
-      'Giữ xe cho hành trình',
-      `Giữ ${vehicleName(id)} trong ${d().policy.holdMinutes} phút. Mã nhận xe sẽ hiển thị trong Đặt chỗ của tôi.`,
-      async () => {
-        await api('/reservations/vehicle', { method: 'POST', body: { vehicleId: id } });
-        await changed('Đã giữ xe. Hãy nhận xe trước khi hết hạn.', 'reservations');
-      },
-      'Giữ xe 15 phút',
-    ),
+  'reserve-vehicle': reserveVehicleForm,
+  'destination-change': destinationForm,
   'parking-new': parkingForm,
   'charge-new': chargeForm,
   'reservation-tab': (id) => {
@@ -918,10 +1153,7 @@ const handlers = {
     const items =
       r.kind === 'VEHICLE'
         ? d()
-            .vehicles.filter(
-              (v) =>
-                v.currentHubId === r.hubId && v.status === 'AVAILABLE' && v.ownership === 'SHARED',
-            )
+            .vehicles.filter((v) => v.currentHubId === r.hubId && v.rentable)
             .map((v) => [v.id, `${v.code} · ${Math.round(v.batteryLevel)}%`])
         : r.kind === 'PARKING'
           ? d()
@@ -969,7 +1201,7 @@ const handlers = {
         ),
       async (f) => {
         await api('/rentals/pickup', { method: 'POST', body: { reservationId: id, code: f.code } });
-        await changed('Đã mở khóa giả lập. Chúc bạn có hành trình tốt!', 'rentals');
+        await changed('Đã nhận xe. Chỗ trả tại Hub đăng ký tiếp tục được giữ.', 'rentals');
       },
       'Xác nhận nhận xe',
     );
@@ -980,7 +1212,7 @@ const handlers = {
       'Xác nhận xe cá nhân của bạn đã vào đúng vị trí được giữ tại Hub.',
       async () => {
         await api('/reservations/' + id + '/confirm-parking', { method: 'POST', body: {} });
-        await changed('Đã ghi nhận xe vào chỗ đỗ.');
+        await changed('Đã ghi nhận xe vào chỗ đỗ.', 'vehicles');
       },
       'Xe đã vào chỗ',
     ),
@@ -995,6 +1227,44 @@ const handlers = {
       'Bắt đầu sạc',
     ),
   'rental-return': (id) => returnForm(find('rentals', id)),
+  'parking-checkout': (id) =>
+    confirm(
+      'Xác nhận lấy xe',
+      `Xe ${vehicleName(id)} sẽ rời Hub và giải phóng chỗ đỗ. Hãy kết thúc sạc, ngắt kết nối hoặc hủy yêu cầu chờ trước khi lấy xe.`,
+      async () => {
+        await api('/vehicles/' + id + '/checkout', { method: 'POST', body: {} });
+        await changed('Đã kết thúc gửi xe.', 'vehicles');
+      },
+      'Xác nhận lấy xe',
+    ),
+  'charge-stop': (id) =>
+    confirm(
+      'Dừng sạc',
+      'Dừng cấp điện ở mức pin hiện tại. Sau đó cần xác nhận ngắt kết nối để giải phóng cổng.',
+      async () => {
+        await api('/charging/' + id + '/stop', { method: 'POST', body: {} });
+        await changed('Đã dừng sạc. Hãy ngắt kết nối.', 'charging');
+      },
+      'Dừng sạc',
+    ),
+  'charge-disconnect': (id) =>
+    confirm(
+      'Ngắt kết nối sạc',
+      'Xác nhận đã tháo đầu sạc khỏi xe. Cổng được giải phóng và hàng đợi sẽ được phân bổ lại.',
+      async () => {
+        await api('/charging/' + id + '/disconnect', { method: 'POST', body: {} });
+        await changed('Đã ngắt kết nối và giải phóng cổng.', 'charging');
+      },
+      'Xác nhận ngắt kết nối',
+    ),
+  'notifications-read': async () => {
+    await api('/notifications/read', { method: 'POST', body: {} });
+    await changed('Đã đánh dấu thông báo đã đọc.');
+  },
+  'notification-read': async (id) => {
+    await api('/notifications/read', { method: 'POST', body: { id } });
+    await load(true);
+  },
   'incident-new': incidentForm,
   'incident-detail': (id) => {
     const i = find('incidents', id);
@@ -1054,7 +1324,7 @@ const handlers = {
     const o = await api('/dispatch/' + id);
     modal(
       'Chi tiết lệnh điều phối',
-      `<div class="details"><span>Mã: <strong>${short(o.id)}</strong></span>${badge(o.status)}</div><div class="modal-summary">${icon('truck')}<strong>${esc(hubName(o.fromHubId))} → ${esc(hubName(o.toHubId))}</strong></div><p class="muted small">Người thực hiện: ${esc(techName(o.technicianId))}</p><h3 style="margin:20px 0 10px">Xe và chỗ tiếp nhận</h3>${table(
+      `<div class="details"><span>Mã: <strong>${short(o.id)}</strong></span>${badge(o.status)}</div><div class="modal-summary"><strong>${esc(hubName(o.fromHubId))} → ${esc(hubName(o.toHubId))}</strong></div><p class="muted small">Người thực hiện: ${esc(techName(o.technicianId))}</p><h3 style="margin:20px 0 10px">Xe và chỗ tiếp nhận</h3>${table(
         ['Xe', 'Chỗ nhận'],
         o.vehicleIds.map(
           (v, i) =>
@@ -1067,7 +1337,7 @@ const handlers = {
     const o = find('dispatchOrders', id);
     modal(
       'Bàn giao xe tại Hub đích',
-      `<div class="notice">${o.vehicleIds.length} xe · Hub đích: <strong>${esc(hubName(o.toHubId))}</strong></div><label class="checkbox"><input type="checkbox" name="simulate" checked>Đặt vị trí các xe trong bộ mô phỏng tại Hub đích trước khi xác nhận.</label><p class="muted small">Hệ thống xác minh toàn bộ xe và các chỗ tiếp nhận đã giữ trước khi hoàn tất lệnh.</p>`,
+      `<div class="notice">${o.vehicleIds.length} xe · Hub đích: <strong>${esc(hubName(o.toHubId))}</strong></div><label class="checkbox"><input type="checkbox" name="simulate" checked>Tôi xác nhận các xe đã đến Hub đích và sẵn sàng bàn giao (mô phỏng).</label><p class="muted small">Hệ thống xác minh toàn bộ xe và các chỗ tiếp nhận đã giữ trước khi hoàn tất lệnh.</p>`,
       async (f) => {
         if (f.simulate)
           for (const vehicleId of o.vehicleIds)
@@ -1140,4 +1410,4 @@ setInterval(async () => {
   } finally {
     busy = false;
   }
-}, 10000);
+}, 3000);

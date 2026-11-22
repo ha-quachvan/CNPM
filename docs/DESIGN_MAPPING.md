@@ -86,3 +86,20 @@ Các Entity giữ dữ liệu, có constructor để thuận tiện tạo đối
 - `system.ts` tạo đúng một repository dùng chung cho mỗi instance backend và truyền vào các Service. Reset demo tạo lại instance này.
 - `tests/domain.test.ts` kiểm tra các quy tắc/trạng thái và hoàn tác. `tests/api.test.ts` kiểm tra HTTP, phân quyền và JSON. `tests/browser.mjs` kiểm tra các thao tác qua giao diện ba vai trò, responsive và lỗi JavaScript.
 - Mẫu giao diện tham khảo: [shadcn/ui dashboard](https://ui.shadcn.com/examples/dashboard). Cài đặt dùng HTML/CSS/JavaScript thuần theo phạm vi đã thống nhất, với thiết kế mới cho nhóm.
+
+## Bổ sung khi hoàn thiện MVP
+
+Tài liệu Submission 3 gốc được giữ nguyên theo yêu cầu của nhóm. Danh mục M01–M45 ở trên là mã đối chiếu của thiết kế gốc. MVP bổ sung hành vi sau; không coi mã triển khai vẫn chỉ có đúng 45 phương thức:
+
+| Phần bổ sung                           | Nơi triển khai                       | Mục đích                                                                           |
+| -------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `ReservationService.changeDestination` | `POST /reservations/:id/destination` | Giữ chỗ đích mới trước khi giải phóng chỗ cũ; cập nhật chuyến đang chạy            |
+| `ReservationService.checkoutParking`   | `POST /vehicles/:id/checkout`        | Kết thúc lượt gửi và giải phóng chỗ cá nhân                                        |
+| `ChargingService.stop`                 | `POST /charging/:id/stop`            | Ngừng cấp điện, còn chờ ngắt kết nối                                               |
+| `ChargingService.disconnect`           | `POST /charging/:id/disconnect`      | Giải phóng đầu nối sau khi ngừng sạc                                               |
+| Thuộc tính đích trả                    | VehicleReservation, Rental           | `plannedReturnHubId`, `plannedReturnSpaceId`; phân biệt nơi đăng ký và nơi thực tế |
+| Dữ liệu lượt gửi/thông báo             | `types.ts`, NetworkState             | ParkingVisit, Notification, returnSpaceHolds; không kết nối DB                     |
+| Cơ chế phân bổ dùng chung              | `shared/scheduling.ts`               | Ưu tiên và công thức pin được dùng bởi nghiệp vụ vận hành và What-if               |
+| Mô hình What-if theo thời gian         | `WhatIfEngine`, `data/demand.ts`     | Ba lượt tính trên bản sao, kết quả so sánh, hành động có ràng buộc và thời điểm    |
+
+`reserveVehicle` bổ sung đầu vào Hub trả; sạc luôn qua hàng đợi, trạng thái AWAITING_DISCONNECT/CONNECTED phân biệt ngừng điện và rảnh cổng. Các thay đổi được giải thích trong README, API và hướng dẫn demo; không sửa PDF/LaTeX Submission 3.

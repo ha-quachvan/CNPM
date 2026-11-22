@@ -13,7 +13,15 @@ import { DeviceSimulator } from '../simulation/DeviceSimulator.js';
 import { ensure, must } from '../shared/errors.js';
 import { config, minute } from '../shared/config.js';
 import { id } from '../shared/security.js';
-import { customer, activeHub, fault, restoreVehicle } from '../shared/business.js';
+import {
+  customer,
+  activeHub,
+  fault,
+  restoreVehicle,
+  freeSpace,
+  releaseReturnHold,
+  notify,
+} from '../shared/business.js';
 export class RentalService {
   constructor(
     private repo: InMemoryRepository,
@@ -42,6 +50,12 @@ export class RentalService {
         400,
       );
       activeHub(s, r.hubId);
+      activeHub(s, r.plannedReturnHubId);
+      ensure(
+        s.returnSpaceHolds.get(r.plannedReturnSpaceId) === r.id,
+        'ParkingConflict',
+        'Chỗ trả xe chưa được giữ hợp lệ.',
+      );
       const v = must(s.vehicles, r.vehicleId);
       ensure(
         v.status === VehicleStatus.RESERVED &&
@@ -71,6 +85,8 @@ export class RentalService {
         vehicleId: v.id,
         reservationId: r.id,
         pickupHubId: r.hubId,
+        plannedReturnHubId: r.plannedReturnHubId,
+        plannedReturnSpaceId: r.plannedReturnSpaceId,
         startedAt: this.now(),
         fee: 0,
         penalty: 0,
@@ -100,15 +116,15 @@ export class RentalService {
       const telemetry = this.simulator.readTelemetry(v.id);
       const fee =
         Math.max(1, Math.ceil((this.now() - r.startedAt) / minute)) * config.pricePerMinute;
-      const penalty = data.hubId === r.pickupHubId ? 0 : config.wrongHubPenalty;
+      const penalty = data.hubId === r.plannedReturnHubId ? 0 : config.wrongHubPenalty;
       const p = s.spaces.get(data.spaceId);
       ensure(
         telemetry.position.hubId === data.hubId &&
           p &&
           p.hubId === data.hubId &&
-          p.status === SpaceStatus.FREE &&
           !p.vehicleId &&
-          !s.dispatchSpaceHolds.has(p.id),
+          (freeSpace(s, p) ||
+            (p.status === SpaceStatus.HELD && s.returnSpaceHolds.get(p.id) === r.reservationId)),
         'ParkingConflict',
         'Chưa xác nhận được chỗ trả xe. Phiên thuê tiếp tục; hãy chọn chỗ trống và xác nhận vị trí mô phỏng.',
         409,
@@ -126,12 +142,22 @@ export class RentalService {
       r.returnHubId = data.hubId;
       r.status = RentalStatus.COMPLETED;
       must(s.reservations, r.reservationId).status = ReservationStatus.COMPLETED;
+      releaseReturnHold(s, r.reservationId);
       p.status = SpaceStatus.OCCUPIED;
       p.vehicleId = v.id;
       v.currentHubId = data.hubId;
       v.parkingSpaceId = p.id;
       v.batteryLevel = telemetry.batteryLevel;
       restoreVehicle(s, v);
+      notify(
+        s,
+        userId,
+        'RENTAL_RETURN',
+        'Đã hoàn tất chuyến đi',
+        `Xe ${v.code} đã được trả tại ${must(s.hubs, data.hubId).name}. Tổng phí ${fee + penalty} đồng.`,
+        this.now(),
+        r.id,
+      );
       return r;
     });
   }

@@ -1,90 +1,91 @@
-# Kịch bản trình diễn Smart E-Mobility Hub
+# Demo 8 phút + 2 phút Q&A
 
-## Chuẩn bị
+## Chuẩn bị trước buổi trình bày
 
-1. Chạy `npm ci`, `npm run build`, `npm start`; mở `http://localhost:3000`.
-2. Dùng các cửa sổ/hồ sơ trình duyệt tách biệt cho Customer, Operator, Technician để cookie không thay thế nhau.
-3. Mật khẩu mọi tài khoản mẫu: `Demo@12345`.
-4. Nếu cần bắt đầu từ đầu, đăng nhập Operator → Công cụ demo → Đặt lại dữ liệu demo; sau đó đăng nhập lại các cửa sổ.
+1. `npm ci`, `npm run build`, `npm start`; mở `http://localhost:3000`.
+2. Dùng ba hồ sơ/cửa sổ trình duyệt tách biệt: Customer, Operator, Technician. Các tab cùng hồ sơ chia sẻ cookie.
+3. Đăng nhập bằng các nút tài khoản mẫu, mật khẩu `Demo@12345`.
+4. Nếu cần dữ liệu ban đầu: Operator → Công cụ demo → Đặt lại dữ liệu; đăng nhập lại cả ba cửa sổ. Không đặt lại giữa chừng.
+5. Chuẩn bị sẵn trang Tìm Hub, Điều phối và Xử lý sự cố. Không dùng thời gian trình bày để cài đặt hoặc gõ tài khoản.
+6. Diễn tập trước; kết quả What-if phụ thuộc trạng thái tại lúc chạy. Dùng cùng quy trình thao tác nếu muốn tái hiện cùng số liệu.
 
-## 1. Customer tìm, đặt, nhận và trả xe
+## 0:00–0:40 — Phạm vi và kiến trúc
 
-1. Đăng nhập `customer@hub.local`.
-2. Mở Tìm Hub; thử nhập `Ký túc`, lọc xe đạp điện và mức pin.
-3. Mở KTX Khu A, chọn một xe sẵn sàng, bấm Giữ xe và xác nhận.
-4. Vào Đặt chỗ của tôi: xem mã nhận và thời gian còn lại.
-5. Bấm Nhận xe, thử mã sai rồi nhập mã đúng. Chuyến đi chỉ bắt đầu sau khi mở khóa giả lập thành công.
-6. Vào Chuyến đi → Trả xe. Chọn Hub và chỗ trống; giữ lựa chọn mô phỏng vị trí rồi xác nhận.
-7. Xem phí và lịch sử. Trả tại Hub khác KTX Khu A để minh họa khoản phạt.
-8. Có thể bỏ chọn mô phỏng vị trí và chọn Hub không khớp quan sát để thấy thông báo chưa xác nhận; xe không bị cộng vào Hub sai.
+“Hệ thống quản lý xe, chỗ đỗ và sạc tại sáu Hub. Ba vai trò dùng chung backend TypeScript/Express. Trạng thái được lưu trong RAM; vị trí và phản hồi khóa xe được mô phỏng. What-if phân tích một bản sao riêng.”
 
-## 2. Hai khách tranh cùng một xe
+## 0:40–2:20 — Thuê xe một chiều
 
-1. Dùng `customer@hub.local` và `customer2@hub.local` trong hai hồ sơ trình duyệt.
-2. Cả hai mở cùng Hub và cùng một xe trước khi đặt.
-3. Khách thứ nhất giữ xe thành công.
-4. Khách thứ hai thử giữ từ màn hình cũ: backend trả xung đột.
-5. Operator nhìn thấy xe đã RESERVED trong cùng kho dữ liệu.
+1. Customer → Tìm Hub → Ga Metro ĐHQG → chọn một xe đủ pin.
+2. Bấm Giữ xe, chọn Hub trả **Đại học Bách khoa**, xác nhận.
+3. Chỉ vào mã nhận xe, thời hạn 15 phút và chỗ trả được giữ.
+4. Bấm Nhận xe, nhập mã đúng. Có thể nhập sai một lần nếu còn thời gian.
+5. Vào Chuyến đi → Trả xe tại Hub. Mặc định là Hub/chỗ đã đăng ký.
+6. Tích xác nhận xe đã đến, xác nhận trả. Phạt bằng 0 dù Hub nhận và trả khác nhau.
 
-## 3. Đặt chỗ cho xe cá nhân
+Điểm giải thích: xe và chỗ đích được giữ cùng lúc; nhận xe giải phóng chỗ nguồn. Hết thời gian nhận thì giải phóng cả hai. Sau khi nhận, chỗ đích vẫn được giữ. Đổi Hub trả thành công thì Hub mới là nơi trả hợp lệ.
 
-1. Customer → Đặt chỗ của tôi → Đặt chỗ đỗ.
-2. Chọn xe `59-T2 678.90` đang ngoài Hub, chọn một chỗ trống tại KTX Khu B.
-3. Thử Gia hạn hoặc Đổi tài nguyên; hạn hiện hành không bị đặt lại khi đổi.
-4. Bấm Xác nhận đỗ; chỗ chuyển sang đang sử dụng và xe được liên kết với vị trí.
-5. Có thể hủy trước khi xác nhận để minh họa giải phóng giữ chỗ.
+## 2:20–3:50 — Xe cá nhân, sạc và lấy xe
 
-## 4. Yêu cầu và theo dõi sạc
+1. Customer → Xe cá nhân → Đặt chỗ đỗ cho **59-T2 678.90**, chọn KTX B, giữ và xác nhận đỗ.
+2. Lấy xe ngay để cho thấy chỗ được giải phóng và có lịch sử vào/ra.
+3. Sang Sạc xe → yêu cầu sạc **59-T1 123.45** đang ở Metro. Chọn mục tiêu **36%** để minh họa chuyển trạng thái nhanh; đây là mục tiêu minh họa, không phải lịch sạc sử dụng thông thường.
+4. Được cấp cổng → Bắt đầu sạc.
+5. Operator → Công cụ demo → +1 phút. Quay lại Customer và làm mới.
+6. Phiên chuyển sang Chờ ngắt kết nối; mở thông báo đạt mục tiêu. Ngắt kết nối rồi có thể lấy xe tại Xe cá nhân.
 
-1. Customer → Sạc xe → Yêu cầu sạc.
-2. Chọn `59-T1 123.45`, pin ban đầu 35%, đang tại KTX Khu A; mục tiêu 80%.
-3. Chọn Tự động phân bổ để xem cơ chế hàng chờ. Khi có cổng và ngân sách công suất, yêu cầu được cấp cổng.
-4. Bấm Bắt đầu sạc. Xem mức pin, mục tiêu, cổng và trạng thái phiên.
-5. Operator → Công cụ demo → +15 phút hoặc +1 giờ. Quay lại Customer, bấm Làm mới để thấy pin tăng/phiên hoàn tất.
-6. Sạc đến mục tiêu dừng đúng mục tiêu, cổng được giải phóng. Thời gian 15 phút giữ cổng không đóng một phiên sạc đã bắt đầu.
+Nếu thiếu thời gian, chỉ minh họa đặt–đỗ–lấy và phiên sạc được cấp cổng; dùng dữ liệu hàng đợi sẵn ở Operator để giải thích ưu tiên.
 
-## 5. Sự cố và kỹ thuật viên
+## 3:50–4:40 — Sự cố
 
-1. Customer → Báo cáo sự cố → chọn xe/cổng, nhập mô tả.
-2. Technician đăng nhập `technician@hub.local`, mở Xử lý sự cố.
-3. Bấm Nhận xử lý; trạng thái chuyển từ Chưa tiếp nhận sang Đang xử lý.
-4. Technician thứ hai thử nhận cùng báo cáo: không được nhận lại.
-5. Technician đã nhận bấm Hoàn tất, nhập ghi chú; sau phản hồi CHECK hợp lệ, báo cáo được đóng.
-6. Sự cố mẫu có sẵn liên quan xe tại Đại học Bách khoa. Khôi phục tài nguyên xét các phiên/giữ chỗ còn tồn tại.
+Dùng báo cáo mẫu `incident-demo` về khóa xe tại Bách khoa. Technician nhận xử lý, ghi chú kết quả và hoàn tất. Chỉ rõ cùng một báo cáo không thể có hai người nhận; đóng báo cáo không được giải phóng xe còn đang thuê hoặc đang sạc.
 
-## 6. Điều phối xe giữa Hub
+## 4:40–5:50 — Điều phối
 
-1. Operator → Điều phối xe → Tạo lệnh.
-2. Chọn KTX Khu A → KTX Khu B, số xe 1 hoặc 2.
-3. Mở Chi tiết để thấy xe cụ thể và các chỗ nhận được giữ.
-4. Khi lệnh đang chờ, thử sửa số xe hoặc hủy. Yêu cầu vượt số xe/chỗ nhận bị từ chối, lệnh cũ vẫn giữ nguyên.
-5. Technician → Lệnh điều phối → Nhận lệnh. Xe chuyển sang đang vận chuyển, chỗ nguồn được giải phóng; chỗ đích vẫn đang giữ.
-6. Bấm Bàn giao xe, giữ lựa chọn mô phỏng xe đã đến Hub đích và xác nhận.
-7. Operator Làm mới để thấy trạng thái hoàn tất và số xe ở Hub đích thay đổi.
-8. Bỏ chọn mô phỏng đến đích để minh họa nhánh vị trí không khớp; lệnh không hoàn tất một phần.
+1. Operator → Điều phối xe → tạo lệnh **KTX A → Metro, 2 xe**.
+2. Mở chi tiết để thấy xe và chỗ nhận được giữ.
+3. Technician nhận lệnh; chỗ nguồn được giải phóng, chỗ đích vẫn giữ.
+4. Bàn giao, xác nhận xe đã đến Hub đích và hoàn tất.
+5. Operator làm mới để thấy số xe thay đổi.
 
-## 7. What-if
+## 5:50–6:50 — What-if
 
-1. Operator → Mô phỏng What-if.
-2. Chọn Nhu cầu di chuyển tăng, Hub A, hệ số 2, khoảng dự báo 60 phút, seed 42.
-3. Chạy mô phỏng, đọc nhu cầu dự kiến, nguồn xe và khuyến nghị.
-4. Thử Hub đầy, Nhu cầu sạc tăng, Cổng sạc gặp sự cố hoặc Mất cân bằng xe.
-5. Dữ liệu đang vận hành không thay đổi theo giả định. Cùng trạng thái đầu vào, tham số và seed cho cùng chỉ số.
-6. `60 phút` là thời gian tình huống được khảo sát; giới hạn thực thi phép tính là 15 giây.
+1. Operator → What-if → Nhu cầu di chuyển tăng tại Metro, hệ số 2, 60 phút, seed 42.
+2. Bấm chạy một lần. Ba lượt tính nội bộ trả bảng so sánh.
+3. Đọc lượt phục vụ/chưa phục vụ trước và sau phương án.
+4. Chỉ vào một lệnh: nguồn, đích, số xe và phút đến.
+5. Nếu có cảnh báo đánh đổi hoặc phương án chưa cải thiện, đọc đúng kết quả. Không khẳng định mọi tình huống đều có giải pháp tốt hơn.
 
-## 8. Hết hạn, lỗi thiết bị và tài khoản
+Câu giải thích ngắn: “Mô hình tiến mỗi bước 5 phút, cập nhật xe đi–đến và sạc. Khi thiếu xe hoặc chỗ, thử phương án trong giới hạn nguồn lực rồi chạy lại. Kết quả không tự áp dụng vào mạng lưới.”
 
-- Tạo một đặt xe rồi dùng Operator → Công cụ demo → +15 phút. Customer Làm mới: đặt hết hạn, xe khả dụng trở lại nhưng chỗ đang chứa xe vẫn đang sử dụng.
-- Operator cấu hình xe/lệnh Mở khóa trả Thất bại. Customer thử nhận đúng xe: báo lỗi, không tạo chuyến đi và không giải phóng chỗ nguồn. Đặt phản hồi về Thành công để tiếp tục.
-- Thử 5 lần mật khẩu sai; tài khoản bị khóa 15 phút. Có thể dùng công cụ tiến thời gian của Operator hoặc đặt lại dữ liệu.
-- Chọn Quên mật khẩu ở trang đăng nhập: lấy mã demo, xác minh, đặt mật khẩu mới; các phiên cũ bị thu hồi.
-- Thử đăng nhập qua Google/Clerk Demo: đây là danh tính giả lập, không gọi nhà cung cấp thật.
+Có thể thay bằng Hub đầy tại KTX A để thấy chuyển hướng sang một Hub còn chỗ. Không cần chạy cả năm tình huống trong 8 phút.
 
-## Mạch báo cáo khoảng 10 phút
+## 6:50–7:20 — Một nhánh lỗi
 
-- 1 phút: phạm vi, kiến trúc và các vai trò.
-- 3 phút: tìm–đặt–nhận–trả xe, chỉ ra trạng thái thay đổi.
-- 2 phút: sạc hoặc sự cố.
-- 2 phút: điều phối qua Operator và Technician.
-- 1 phút: What-if và tính độc lập của snapshot.
-- 1 phút: tranh tài nguyên, lỗi mở khóa hoặc hết hạn giữ chỗ.
+Chọn **một** trong các nhánh đã diễn tập:
+
+- Mã nhận sai không tạo chuyến đi.
+- Lấy xe đang sạc bị từ chối.
+- Operator tạo lệnh vượt xe/chỗ bị từ chối; lệnh cũ không bị thay đổi.
+
+## 7:20–8:00 — Kết luận và đệm
+
+Chốt ba ý: quản lý trạng thái nhất quán; phân bổ tài nguyên có giới hạn; mô phỏng phục vụ quyết định. Dành khoảng đệm cho chuyển cửa sổ hoặc thao tác chậm.
+
+## Hàng đợi sạc: chuẩn bị cho Q&A
+
+KTX A có cổng `hub-a-c1` đang sạc xe của `customer3`, ngân sách 3.3 kW dùng hết. Yêu cầu `charge-seed-wait-2` cần xe sớm hơn `charge-seed-wait-1`, nên được cấp trước dù không chỉ xét thứ tự tạo.
+
+Operator → Quản lý sạc → Dừng phiên nền rồi ngắt kết nối. Quan sát yêu cầu đến hạn sớm được cấp cổng trước. Các cổng trống khác vẫn có thể phải chờ vì ngân sách công suất đã được giữ. Một cổng chờ ngắt kết nối không được cấp lại cho xe khác.
+
+## Q&A nên nắm
+
+- Dữ liệu chung nằm ở đâu, mất khi nào? RAM của backend; khởi động lại/reset nạp dữ liệu mẫu.
+- Hai khách đặt cùng xe? Backend kiểm tra và cập nhật đồng bộ qua bản draft; chỉ một yêu cầu thành công trong một tiến trình.
+- Làm sao biết xe đến? Trong demo, xác nhận đến nơi cung cấp quan sát giả lập; Service kiểm tra trước khi cập nhật nghiệp vụ.
+- Vì sao pin đủ nhưng cổng chưa rảnh? Còn đầu nối; phải ngắt kết nối mới giải phóng.
+- Vì sao cổng trống nhưng chưa cấp? Còn điều kiện công suất, quyền sử dụng và ưu tiên.
+- What-if có phải AI? Không; mô hình theo bước thời gian, lịch nhu cầu giả lập và heuristic có ràng buộc.
+- Có bảo đảm tối ưu? Không. Kết quả được chạy lại, thể hiện cả đánh đổi và khả năng chưa tìm được phương án cải thiện.
+- Tại sao không lấy lượt thuê trừ số xe? Lượt trong cả kỳ khác lượng xe tại một thời điểm; xe có thể phục vụ lại sau khi đến nơi.
+
+Khai báo việc sử dụng Generative AI theo yêu cầu môn học; mỗi thành viên cần hiểu và giải thích phần triển khai của nhóm.

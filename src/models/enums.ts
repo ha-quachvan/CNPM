@@ -35,6 +35,7 @@ export enum PortStatus {
   FREE = 'FREE',
   HELD = 'HELD',
   CHARGING = 'CHARGING',
+  CONNECTED = 'CONNECTED',
   FAULT = 'FAULT',
 }
 export enum ReservationKind {
@@ -56,6 +57,7 @@ export enum RentalStatus {
 }
 export enum ChargingSessionStatus {
   ACTIVE = 'ACTIVE',
+  AWAITING_DISCONNECT = 'AWAITING_DISCONNECT',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
 }

@@ -3,7 +3,14 @@ import { Role, DispatchStatus, VehicleStatus, SpaceStatus } from '../models/enum
 import type { DispatchDTO, DispatchFilterDTO, NetworkState } from '../models/types.js';
 import { InMemoryRepository } from '../repositories/InMemoryRepository.js';
 import { DeviceSimulator } from '../simulation/DeviceSimulator.js';
-import { actor, activeHub, freeVehicle, restoreVehicle, fault } from '../shared/business.js';
+import {
+  actor,
+  activeHub,
+  freeVehicle,
+  restoreVehicle,
+  fault,
+  freeSpace,
+} from '../shared/business.js';
 import { ensure, must, numeric } from '../shared/errors.js';
 import { id } from '../shared/security.js';
 export class DispatchService {
@@ -187,12 +194,7 @@ export class DispatchService {
       .filter((v) => v.currentHubId === data.fromHubId && freeVehicle(s, v))
       .slice(0, data.quantity);
     const spaces = [...s.spaces.values()]
-      .filter(
-        (p) =>
-          p.hubId === data.toHubId &&
-          p.status === SpaceStatus.FREE &&
-          !s.dispatchSpaceHolds.has(p.id),
-      )
+      .filter((p) => p.hubId === data.toHubId && freeSpace(s, p))
       .slice(0, data.quantity);
     ensure(
       vehicles.length === data.quantity,

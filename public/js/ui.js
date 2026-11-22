@@ -25,6 +25,8 @@ export const labels = {
   RESERVED: 'Đang giữ',
   IN_USE: 'Đang sử dụng',
   CHARGING: 'Đang sạc',
+  CONNECTED: 'Chờ ngắt kết nối',
+  AWAITING_DISCONNECT: 'Chờ ngắt kết nối',
   DISPATCH_RESERVED: 'Đã giữ điều phối',
   IN_TRANSIT: 'Đang vận chuyển',
   FREE: 'Còn trống',
@@ -50,7 +52,7 @@ export const labels = {
   HUB_FULL: 'Hub đầy chỗ đỗ',
   CHARGING_SURGE: 'Nhu cầu sạc tăng',
   PORT_FAILURE: 'Cổng sạc gặp sự cố',
-  VEHICLE_IMBALANCE: 'Mất cân bằng xe',
+  VEHICLE_IMBALANCE: 'Xe tập trung tại một Hub',
 };
 export const label = (v) => labels[v] || v || '—';
 const paths = {
@@ -99,25 +101,28 @@ export function badge(status) {
   return `<span class="badge ${color}"><i></i>${esc(label(status))}</span>`;
 }
 export const button = (text, action, id = '', cls = 'secondary', glyph = '') =>
-  `<button type="button" class="btn ${cls}" data-action="${esc(action)}" data-id="${esc(id)}">${glyph ? icon(glyph) : ''}${esc(text)}</button>`;
+  `<button type="button" class="btn ${cls}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(text)}</button>`;
 export const option = (value, title, selected) =>
   `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(title)}</option>`;
 export const empty = (title, desc, action = '') =>
-  `<div class="empty">${icon('inbox')}<h3>${esc(title)}</h3><p>${esc(desc)}</p>${action}</div>`;
+  `<div class="empty"><h3>${esc(title)}</h3><p>${esc(desc)}</p>${action}</div>`;
 export function toast(message, error = false) {
   const node = document.createElement('div');
   node.className = `toast ${error ? 'error' : ''}`;
+  node.dataset.message = message;
   node.setAttribute('role', error ? 'alert' : 'status');
   node.innerHTML = icon(error ? 'alert' : 'check') + `<span>${esc(message)}</span>`;
   const container = document.querySelector('#toasts');
-  while (container.children.length >= 3) container.firstElementChild.remove();
+  for (const previous of [...container.children])
+    if (previous.dataset.message === message) previous.remove();
+  while (container.children.length >= 2) container.firstElementChild.remove();
   container.append(node);
-  setTimeout(() => node.remove(), 5500);
+  setTimeout(() => node.remove(), 4200);
 }
 export function modal(title, content, onSubmit, submitText = 'Xác nhận') {
   const dialog = document.querySelector('#dialog');
   const oldFocus = document.activeElement;
-  dialog.innerHTML = `<form id="dialog-form"><div class="dialog-head"><div><span class="eyebrow">E-MOBILITY HUB</span><h2>${esc(title)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Đóng">${icon('close')}</button></div><div class="dialog-body">${content}<div class="form-error" id="dialog-error" role="alert" hidden></div></div><div class="dialog-foot"><button type="button" class="btn secondary" data-close>${onSubmit ? 'Quay lại' : 'Đóng'}</button>${onSubmit ? `<button class="btn primary" type="submit">${esc(submitText)}${icon('arrow')}</button>` : ''}</div></form>`;
+  dialog.innerHTML = `<form id="dialog-form"><div class="dialog-head"><div><span class="eyebrow">E-MOBILITY HUB</span><h2>${esc(title)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Đóng">${icon('close')}</button></div><div class="dialog-body">${content}<div class="form-error" id="dialog-error" role="alert" hidden></div></div><div class="dialog-foot"><button type="button" class="btn secondary" data-close>${onSubmit ? 'Quay lại' : 'Đóng'}</button>${onSubmit ? `<button class="btn primary" type="submit">${esc(submitText)}</button>` : ''}</div></form>`;
   const close = () => {
     dialog.close();
     oldFocus?.focus();

@@ -93,9 +93,11 @@ export interface HubSummaryDTO {
   freePorts: number;
   totalSpaces: number;
   batteryAverage: number;
+  chargingUsedKw: number;
+  chargingAvailableKw: number;
 }
 export interface HubDetailDTO extends HubSummaryDTO {
-  vehicles: Vehicle[];
+  vehicles: (Vehicle & { rentable: boolean })[];
   spaces: ParkingSpace[];
   ports: ChargingPort[];
 }
@@ -118,6 +120,73 @@ export interface ParkingRequestDTO {
 export interface ReturnDTO {
   hubId: ID;
   spaceId: ID;
+}
+export interface VehicleRequestDTO {
+  vehicleId: ID;
+  returnHubId: ID;
+}
+export interface ParkingVisit {
+  id: ID;
+  userId: ID;
+  vehicleId: ID;
+  hubId: ID;
+  spaceId: ID;
+  enteredAt: Timestamp;
+  exitedAt?: Timestamp;
+}
+export interface Notification {
+  id: ID;
+  userId: ID;
+  kind: string;
+  title: string;
+  message: string;
+  createdAt: Timestamp;
+  referenceId?: ID;
+  readAt?: Timestamp;
+}
+export interface SimulationMetrics {
+  requestedTrips: number;
+  servedTrips: number;
+  unservedTrips: number;
+  blockedReturns: number;
+  redirectedTrips: number;
+  waitingCharges: number;
+  completedCharges: number;
+  expiredCharges: number;
+  maxChargeWaitMinutes: number;
+  lateCharges: number;
+}
+export interface SimulationAction {
+  type: 'RELOCATE' | 'REDIRECT';
+  fromHubId: ID;
+  toHubId: ID;
+  quantity: number;
+  departMinute: number;
+  arrivalMinute: number;
+  reason: string;
+  originalDestinationHubId?: ID;
+}
+export interface SimulationFrame {
+  minute: number;
+  availableVehicles: number;
+  waitingCharges: number;
+  unservedTrips: number;
+  hubs: {
+    hubId: ID;
+    availableVehicles: number;
+    occupiedSpaces: number;
+    heldSpaces: number;
+    capacity: number;
+    freePorts: number;
+    faultPorts: number;
+    chargingKw: number;
+  }[];
+}
+export interface SimulationComparison {
+  baseline: SimulationMetrics;
+  scenario: SimulationMetrics;
+  coordinated: SimulationMetrics;
+  improved: boolean;
 }
 export interface ChargeRequestDTO {
   vehicleId: ID;
@@ -178,6 +247,9 @@ export interface NetworkState {
   incidents: Map<ID, Incident>;
   dispatchOrders: Map<ID, DispatchOrder>;
   dispatchSpaceHolds: Map<ID, ID>;
+  returnSpaceHolds: Map<ID, ID>;
+  parkingVisits: Map<ID, ParkingVisit>;
+  notifications: Map<ID, Notification>;
 }
-export type Collection = Exclude<keyof NetworkState, 'dispatchSpaceHolds'>;
+export type Collection = Exclude<keyof NetworkState, 'dispatchSpaceHolds' | 'returnSpaceHolds'>;
 export type StateAction<T> = (draft: NetworkState) => T;

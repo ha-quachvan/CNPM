@@ -8,11 +8,12 @@ import {
   VehicleOwnership,
   RentalStatus,
   ChargingSessionStatus,
+  Role,
 } from '../models/enums.js';
-import type { ParkingRequestDTO } from '../models/types.js';
+import type { ParkingRequestDTO, NetworkState, AnyReservation } from '../models/types.js';
 import { InMemoryRepository } from '../repositories/InMemoryRepository.js';
 import { config, minute } from '../shared/config.js';
-import { ensure, must, numeric } from '../shared/errors.js';
+import { ensure, must, numeric, text } from '../shared/errors.js';
 import { id } from '../shared/security.js';
 import {
   customer,
@@ -22,13 +23,21 @@ import {
   releaseReservation,
   powerUsed,
   fault,
+  restoreVehicle,
+  freeSpace,
+  holdReturnSpace,
+  releaseReturnHold,
+  connected,
+  notify,
+  actor,
 } from '../shared/business.js';
 export class ReservationService {
   constructor(
     private repo: InMemoryRepository,
     private now = Date.now,
   ) {}
-  reserveVehicle(userId: string, vehicleId: string): VehicleReservation {
+  reserveVehicle(userId: string, vehicleId: string, returnHubId: string): VehicleReservation {
+    returnHubId = text(returnHubId, 'Hub trả', 80);
     this.expire(this.now());
     return this.repo.transact((s) => {
       customer(s, userId);
@@ -60,7 +69,9 @@ export class ReservationService {
         extensionCount: 0,
         vehicleId,
         pickupCode: String(Math.floor(100000 + Math.random() * 900000)),
+        plannedReturnHubId: returnHubId,
       });
+      r.plannedReturnSpaceId = holdReturnSpace(s, r.id, returnHubId).id;
       s.reservations.set(r.id, r);
       v.status = VehicleStatus.RESERVED;
       return r;
@@ -86,7 +97,7 @@ export class ReservationService {
         'Xe đang đỗ hoặc có yêu cầu còn hiệu lực.',
       );
       ensure(
-        p.hubId === data.hubId && p.status === SpaceStatus.FREE && !s.dispatchSpaceHolds.has(p.id),
+        p.hubId === data.hubId && freeSpace(s, p),
         'ResourceConflict',
         'Chỗ đỗ không còn trống.',
       );
@@ -110,9 +121,8 @@ export class ReservationService {
   cancel(userId: string, reservationId: string): void {
     this.expire(this.now());
     this.repo.transact((s) => {
-      customer(s, userId);
       const r = must(s.reservations, reservationId, 'Bản đặt');
-      ensure(r.userId === userId, 'Forbidden', 'Bản đặt không thuộc tài khoản này.', 403);
+      this.ensureOwner(s, userId, r);
       ensure(held(r), 'InvalidReservationState', 'Bản đặt không còn được hủy.');
       r.status = ReservationStatus.CANCELLED;
       releaseReservation(s, r);
@@ -122,9 +132,8 @@ export class ReservationService {
     numeric(extraMinutes, 'Số phút gia hạn', 1, config.maxExtensionMinutes);
     this.expire(this.now());
     return this.repo.transact((s) => {
-      customer(s, userId);
       const r = must(s.reservations, reservationId);
-      ensure(r.userId === userId, 'Forbidden', 'Bản đặt không thuộc tài khoản này.', 403);
+      this.ensureOwner(s, userId, r);
       ensure(
         r.kind !== ReservationKind.VEHICLE &&
           held(r) &&
@@ -141,9 +150,8 @@ export class ReservationService {
   changeResource(userId: string, reservationId: string, newResourceId: string): Reservation {
     this.expire(this.now());
     return this.repo.transact((s) => {
-      customer(s, userId);
       const r = must(s.reservations, reservationId);
-      ensure(r.userId === userId, 'Forbidden', 'Bản đặt không thuộc tài khoản này.', 403);
+      this.ensureOwner(s, userId, r);
       ensure(
         r.status === ReservationStatus.HELD && r.expiresAt > this.now(),
         'InvalidReservationState',
@@ -158,18 +166,15 @@ export class ReservationService {
           'ResourceConflict',
           'Xe mới không khả dụng trong cùng Hub.',
         );
-        const old = r.vehicleId;
-        r.status = ReservationStatus.CANCELLED;
-        releaseReservation(s, r);
+        const old = must(s.vehicles, r.vehicleId);
         r.vehicleId = v.id;
-        r.status = ReservationStatus.HELD;
+        restoreVehicle(s, old);
         v.status = VehicleStatus.RESERVED;
-        ensure(old !== v.id, 'ResourceConflict', 'Trùng tài nguyên.');
       } else if (r.kind === ReservationKind.PARKING) {
         if (r.spaceId === newResourceId) return r;
         const p = must(s.spaces, newResourceId, 'Chỗ đỗ');
         ensure(
-          p.hubId === r.hubId && p.status === SpaceStatus.FREE && !s.dispatchSpaceHolds.has(p.id),
+          p.hubId === r.hubId && freeSpace(s, p),
           'ResourceConflict',
           'Chỗ mới không còn trống trong cùng Hub.',
         );
@@ -230,7 +235,95 @@ export class ReservationService {
       v.parkingSpaceId = p.id;
       v.status = VehicleStatus.AVAILABLE;
       r.status = ReservationStatus.COMPLETED;
+      const visitId = id('parking');
+      s.parkingVisits.set(visitId, {
+        id: visitId,
+        userId,
+        vehicleId: v.id,
+        hubId: r.hubId,
+        spaceId: p.id,
+        enteredAt: this.now(),
+      });
       return r;
+    });
+  }
+  changeDestination(userId: string, reservationId: string, hubId: string): VehicleReservation {
+    this.expire(this.now());
+    return this.repo.transact((s) => {
+      customer(s, userId);
+      const r = must(s.reservations, reservationId);
+      ensure(r.userId === userId, 'Forbidden', 'Bản đặt không thuộc tài khoản này.', 403);
+      ensure(
+        r.kind === ReservationKind.VEHICLE &&
+          [ReservationStatus.HELD, ReservationStatus.CONFIRMED].includes(r.status),
+        'InvalidReservationState',
+        'Chuyến đi không còn được đổi Hub trả.',
+      );
+      activeHub(s, hubId);
+      if (r.plannedReturnHubId === hubId) return r;
+      // Secure the new slot before releasing the previous commitment; failure rolls everything back.
+      const oldSpaceId = r.plannedReturnSpaceId;
+      const p = holdReturnSpace(s, r.id, hubId);
+      s.returnSpaceHolds.delete(oldSpaceId);
+      const old = must(s.spaces, oldSpaceId);
+      if (old.status === SpaceStatus.HELD && !old.vehicleId) old.status = SpaceStatus.FREE;
+      r.plannedReturnHubId = hubId;
+      r.plannedReturnSpaceId = p.id;
+      const rental = [...s.rentals.values()].find(
+        (x) => x.reservationId === r.id && x.status === RentalStatus.ACTIVE,
+      );
+      if (rental) {
+        rental.plannedReturnHubId = hubId;
+        rental.plannedReturnSpaceId = p.id;
+      }
+      return r;
+    });
+  }
+  checkoutParking(userId: string, vehicleId: string) {
+    return this.repo.transact((s) => {
+      customer(s, userId);
+      const v = must(s.vehicles, vehicleId, 'Xe');
+      ensure(
+        v.ownership === VehicleOwnership.PERSONAL && v.ownerId === userId,
+        'Forbidden',
+        'Chỉ chủ xe được xác nhận lấy xe.',
+        403,
+      );
+      ensure(
+        v.currentHubId && v.parkingSpaceId,
+        'InvalidParkingState',
+        'Xe không đang đỗ tại Hub.',
+      );
+      ensure(
+        !connected(s, v.id) &&
+          ![...s.reservations.values()].some((r) => r.vehicleId === v.id && held(r)),
+        'ResourceConflict',
+        'Hãy hủy yêu cầu đang chờ hoặc dừng sạc và ngắt kết nối trước khi lấy xe.',
+      );
+      const p = must(s.spaces, v.parkingSpaceId);
+      ensure(
+        p.vehicleId === v.id && p.status === SpaceStatus.OCCUPIED,
+        'ParkingConflict',
+        'Vị trí đỗ không khớp với xe.',
+      );
+      const visit = [...s.parkingVisits.values()].find((x) => x.vehicleId === v.id && !x.exitedAt);
+      ensure(visit, 'InvalidParkingState', 'Không tìm thấy lượt gửi xe đang hoạt động.');
+      visit.exitedAt = this.now();
+      p.vehicleId = undefined;
+      p.status = SpaceStatus.FREE;
+      v.currentHubId = undefined;
+      v.parkingSpaceId = undefined;
+      v.status = VehicleStatus.IN_USE;
+      notify(
+        s,
+        userId,
+        'PARKING_EXIT',
+        'Đã kết thúc gửi xe',
+        `Xe ${v.code} đã rời Hub; chỗ đỗ được giải phóng.`,
+        this.now(),
+        visit.id,
+      );
+      return visit;
     });
   }
   expire(now: number): number {
@@ -240,9 +333,24 @@ export class ReservationService {
         if (held(r) && r.expiresAt <= now) {
           r.status = ReservationStatus.EXPIRED;
           releaseReservation(s, r);
+          if (r.kind === ReservationKind.CHARGING)
+            notify(
+              s,
+              r.userId,
+              'CHARGE_EXPIRED',
+              'Yêu cầu sạc đã hết hạn',
+              'Yêu cầu đã được giải phóng. Bạn có thể đăng ký lại khi còn nhu cầu.',
+              now,
+              r.id,
+            );
           count++;
         }
       return count;
     });
+  }
+  private ensureOwner(s: NetworkState, userId: string, r: AnyReservation): void {
+    if (!(r.kind === ReservationKind.CHARGING && actor(s, userId).role === Role.OPERATOR))
+      customer(s, userId);
+    ensure(r.userId === userId, 'Forbidden', 'Bản đặt không thuộc tài khoản này.', 403);
   }
 }

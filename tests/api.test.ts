@@ -59,7 +59,7 @@ test('HTTP auth uses HttpOnly cookie, enforces role and ignores spoofed actor ID
     const reserve = await request(
       '/reservations/vehicle',
       'POST',
-      { vehicleId: 'hub-a-v1', userId: 'customer2' },
+      { vehicleId: 'hub-a-v1', returnHubId: 'hub-b', userId: 'customer2' },
       token,
     );
     assert.equal(reserve.body.userId, 'customer');
@@ -84,8 +84,8 @@ test('parallel HTTP reservations cannot double-book a shared vehicle', async () 
       })
     ).body.token;
     const requests = await Promise.all([
-      request('/reservations/vehicle', 'POST', { vehicleId: 'hub-a-v1' }, a),
-      request('/reservations/vehicle', 'POST', { vehicleId: 'hub-a-v1' }, b),
+      request('/reservations/vehicle', 'POST', { vehicleId: 'hub-a-v1', returnHubId: 'hub-b' }, a),
+      request('/reservations/vehicle', 'POST', { vehicleId: 'hub-a-v1', returnHubId: 'hub-b' }, b),
     ]);
     assert.deepEqual(requests.map((r) => r.status).sort(), [201, 409]);
   }));
@@ -174,4 +174,111 @@ test('API access to telemetry and device controls is scoped, expired sessions st
     ).body.token;
     for (let n = 0; n < 8; n++) await request('/demo/advance', 'POST', { seconds: 3600 }, op);
     assert.equal((await request('/workspace', 'GET', undefined, customer)).status, 401);
+  }));
+
+test('HTTP destination booking, personal exit and charging transitions enforce ownership and return coherent state', async () =>
+  withApi(async (request: any) => {
+    const login = async (identifier: string) =>
+      (await request('/auth/login', 'POST', { identifier, password: 'Demo@12345' })).body.token;
+    const customer = await login('customer@hub.local');
+    const other = await login('customer2@hub.local');
+    const operator = await login('operator@hub.local');
+    assert.equal(
+      (await request('/reservations/vehicle', 'POST', { vehicleId: 'hub-metro-v1' }, customer))
+        .status,
+      400,
+    );
+    const booked = await request(
+      '/reservations/vehicle',
+      'POST',
+      { vehicleId: 'hub-metro-v1', returnHubId: 'hub-bk' },
+      customer,
+    );
+    assert.equal(booked.status, 201);
+    assert.equal(
+      (
+        await request(
+          `/reservations/${booked.body.id}/destination`,
+          'POST',
+          { hubId: 'hub-library' },
+          other,
+        )
+      ).status,
+      403,
+    );
+    const changed = await request(
+      `/reservations/${booked.body.id}/destination`,
+      'POST',
+      { hubId: 'hub-library' },
+      customer,
+    );
+    assert.equal(changed.status, 200);
+    const pickup = await request(
+      '/rentals/pickup',
+      'POST',
+      { reservationId: booked.body.id, code: booked.body.pickupCode },
+      customer,
+    );
+    assert.equal(pickup.status, 201);
+    await request(
+      '/demo/telemetry',
+      'POST',
+      { vehicleId: 'hub-metro-v1', hubId: 'hub-library' },
+      customer,
+    );
+    const returned = await request(
+      `/rentals/${pickup.body.id}/return`,
+      'POST',
+      { hubId: 'hub-library', spaceId: changed.body.plannedReturnSpaceId },
+      customer,
+    );
+    assert.equal(returned.status, 200);
+    assert.equal(returned.body.penalty, 0);
+    assert.equal((await request('/vehicles/personal-1/checkout', 'POST', {}, other)).status, 403);
+    const charge = await request(
+      '/charging/requests',
+      'POST',
+      { vehicleId: 'personal-1', hubId: 'hub-metro', targetBattery: 36 },
+      customer,
+    );
+    assert.equal(charge.status, 201);
+    assert.equal(charge.body.status, 'WAITING');
+    await request('/workspace', 'GET', undefined, customer);
+    const start = await request(`/charging/${charge.body.id}/start`, 'POST', {}, customer);
+    assert.equal(start.status, 201);
+    assert.equal(
+      (await request('/vehicles/personal-1/checkout', 'POST', {}, customer)).status,
+      409,
+    );
+    await request('/demo/advance', 'POST', { seconds: 60 }, operator);
+    const ws = (await request('/workspace', 'GET', undefined, customer)).body;
+    assert.equal(
+      ws.chargingSessions.find((c: any) => c.id === start.body.id).status,
+      'AWAITING_DISCONNECT',
+    );
+    const note = ws.notifications.find((n: any) => n.kind === 'CHARGE_TARGET');
+    assert.ok(note);
+    assert.equal(
+      (await request('/notifications/read', 'POST', { id: note.id }, other)).status,
+      403,
+    );
+    assert.equal(
+      (await request('/notifications/read', 'POST', { id: note.id }, customer)).status,
+      200,
+    );
+    assert.equal(
+      (await request(`/charging/${start.body.id}/disconnect`, 'POST', {}, other)).status,
+      403,
+    );
+    assert.equal(
+      (await request(`/charging/${start.body.id}/disconnect`, 'POST', {}, customer)).status,
+      200,
+    );
+    assert.equal(
+      (await request('/vehicles/personal-1/checkout', 'POST', {}, customer)).status,
+      200,
+    );
+    const final = (await request('/workspace', 'GET', undefined, customer)).body;
+    assert.equal(final.vehicles.find((v: any) => v.id === 'personal-1').parkingSpaceId, undefined);
+    assert.ok(final.parkingVisits.some((v: any) => v.vehicleId === 'personal-1' && v.exitedAt));
   }));

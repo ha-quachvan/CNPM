@@ -1,141 +1,126 @@
-# API và quy ước triển khai
+# API và quy tắc MVP
 
-Mọi đường dẫn dưới đây có tiền tố `/api`. JSON được dùng cho yêu cầu và phản hồi. Express phục vụ giao diện và API cùng origin.
+Base: `/api`. JSON object cho POST/PATCH, cookie `hub_session` HttpOnly/SameSite=Strict hoặc Bearer token. Backend lấy actor từ session, không lấy `userId/operatorId` trong body. Dữ liệu trong RAM dùng chung cho một tiến trình.
 
-## Phiên đăng nhập và lỗi
+Mã lỗi chính: 400 dữ liệu sai; 401 hết phiên; 403 sai quyền; 404 ID không tồn tại; 409 xung đột trạng thái/tài nguyên; 408 What-if timeout; 413 body quá 32 KiB. Origin khác host bị từ chối. Lỗi không có thay đổi trạng thái nghiệp vụ từ giao dịch bị thất bại.
 
-`POST /auth/login` nhận `{identifier, password}`. Thành công trả `SessionDTO` và đặt cookie `hub_session` có `HttpOnly`, `SameSite=Strict`. Trình duyệt gửi cookie cho các API tiếp theo. Có thể dùng `Authorization: Bearer <token>` khi kiểm tra bằng HTTP client.
+## Tài khoản và tra cứu
 
-Backend lấy người thao tác từ Session, không tin `userId`, `operatorId`, `technicianId` do client tự khai báo để thay đổi danh tính. Vai trò và quyền sở hữu/phân công được kiểm tra trong Service.
+| Method    | Path                           | Dữ liệu / quyền                                                                                  |
+| --------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
+| GET       | `/health`                      | Trạng thái HTTP                                                                                  |
+| GET       | `/auth/demo-accounts`          | Tài khoản/mật khẩu demo                                                                          |
+| POST      | `/auth/register`               | `{fullName,email?,phone?,password,confirmPassword}`; luôn tạo Customer                           |
+| POST      | `/auth/login`                  | `{identifier,password}`                                                                          |
+| POST      | `/auth/provider`               | `{token}` giả lập Google/Clerk                                                                   |
+| POST      | `/auth/logout`                 | `{}`                                                                                             |
+| POST      | `/auth/password-reset/request` | `{identifier}`; trả mã demo, không gửi email/SMS                                                 |
+| POST      | `/auth/password-reset`         | `{challengeId,code,newPassword,confirmPassword}`                                                 |
+| GET/PATCH | `/me`                          | Xem/sửa fullName, email, phone                                                                   |
+| GET       | `/hubs`                        | `area,vehicleType,minBattery,needsParking,needsCharging,routeHubIds`                             |
+| GET       | `/hubs/:id`                    | Xe, chỗ đỗ, cổng của Hub                                                                         |
+| GET       | `/network`                     | Operator, thống kê toàn mạng                                                                     |
+| GET       | `/workspace`                   | Dữ liệu hiện hành được lọc theo vai trò/sở hữu; có parkingVisits, notifications và công suất Hub |
 
-Lỗi có dạng:
+Workspace không trả passwordHash. Customer chỉ nhận xe cá nhân của mình, bản đặt/phiên thuê/sạc/lượt gửi và thông báo thuộc mình. Operator xem nguồn lực và hàng đợi toàn mạng.
 
-```json
-{ "error": { "code": "ResourceConflict", "message": "Xe không còn khả dụng.", "details": {} } }
-```
+## Đặt và thuê xe
 
-- `400`: đầu vào không hợp lệ.
-- `401`: thông tin đăng nhập hoặc Session không hợp lệ.
-- `403`: sai vai trò/quyền sở hữu/phân công/nguồn yêu cầu.
-- `404`: không tìm thấy dữ liệu/API.
-- `409`: xung đột tài nguyên hoặc trạng thái.
-- `408`: What-if quá thời gian.
-- `413`: JSON vượt giới hạn 32 KiB.
+| Method | Path                            | Body / quyền                                                    |
+| ------ | ------------------------------- | --------------------------------------------------------------- |
+| POST   | `/reservations/vehicle`         | Customer: `{vehicleId,returnHubId}`                             |
+| POST   | `/reservations/:id/destination` | Chủ bản đặt/chuyến đang chạy: `{hubId}`                         |
+| DELETE | `/reservations/:id`             | Chủ bản đặt WAITING/HELD                                        |
+| POST   | `/reservations/:id/resource`    | Chủ bản đặt HELD: `{newResourceId}`; đổi cùng Hub, giữ thời hạn |
+| POST   | `/reservations/:id/extend`      | Chủ bản đặt đỗ/sạc còn hiệu lực: `{extraMinutes}`               |
+| POST   | `/rentals/pickup`               | `{reservationId,code}`                                          |
+| POST   | `/rentals/:id/return`           | `{hubId,spaceId}`                                               |
 
-`Map` trong kết quả What-if được chuyển thành object JSON. Thông tin mật khẩu băm không nằm trong DTO trả cho UI.
+- `VehicleReservation` và `Rental` có `plannedReturnHubId`, `plannedReturnSpaceId`.
+- Giữ xe và chỗ đích trong cùng giao dịch; `returnSpaceHolds` ghi chủ thể giữ. Chỗ đó không được cấp cho gửi xe hoặc điều phối khác.
+- Hủy/hết hạn nhận: giải phóng xe và chỗ trả; chỗ nguồn đang chứa xe vẫn OCCUPIED.
+- Nhận: kiểm tra mã, khóa, Hub và chỗ trả; bản đặt CONFIRMED, Rental ACTIVE, xe IN_USE, giải phóng chỗ nguồn. Cam kết chỗ đích tiếp tục tồn tại.
+- Đổi đích: giữ chỗ mới trước, giải phóng chỗ cũ sau; cập nhật cả bản đặt và Rental. Thất bại giữ nguyên cam kết cũ.
+- Trả: xác minh vị trí quan sát, Hub hoạt động và chỗ đỗ FREE hoặc HELD đúng chủ thể. Trả đúng Hub đăng ký không phạt; khác Hub đăng ký tính 30.000 đồng. Phí thuê 1.000 đồng/phút, làm tròn lên và tối thiểu một phút.
+- Trả thành công: giải phóng cam kết cũ, ghi chỗ thực tế OCCUPIED và kết thúc Rental/bản đặt. Trả lặp bởi đúng chủ thể không cộng tồn lần nữa.
 
-## Tài khoản
+## Xe cá nhân
 
-| Method | URL                            | Nội dung                                                     |
-| ------ | ------------------------------ | ------------------------------------------------------------ |
-| GET    | `/health`                      | Kiểm tra ứng dụng đang chạy                                  |
-| GET    | `/auth/demo-accounts`          | Tài khoản và mật khẩu mẫu của môi trường demo                |
-| POST   | `/auth/register`               | `RegisterDTO`: họ tên, email hoặc SĐT, mật khẩu, xác nhận    |
-| POST   | `/auth/login`                  | `{identifier,password}`                                      |
-| POST   | `/auth/provider`               | `{token}`: `google-demo-customer` hoặc `clerk-demo-customer` |
-| POST   | `/auth/logout`                 | Thu hồi Session; gọi lặp không có tác động phụ               |
-| POST   | `/auth/password-reset/request` | `{identifier}` → mã thử nghiệm có thời hạn                   |
-| POST   | `/auth/password-reset`         | `{challengeId,code,newPassword,confirmPassword}`             |
-| GET    | `/me`                          | Hồ sơ của chủ Session                                        |
-| PATCH  | `/me`                          | Cập nhật `fullName`, `email`, `phone` theo Submission 3      |
+| Method | Path                                | Body                                  |
+| ------ | ----------------------------------- | ------------------------------------- |
+| POST   | `/reservations/parking`             | Customer: `{vehicleId,hubId,spaceId}` |
+| POST   | `/reservations/:id/confirm-parking` | Chủ bản đặt: `{}`                     |
+| POST   | `/vehicles/:id/checkout`            | Chủ xe: `{}`                          |
 
-## Tra cứu và dữ liệu giao diện
+Xác nhận đỗ tạo ParkingVisit, chỗ OCCUPIED và bản đặt COMPLETED. COMPLETED của bản đặt nghĩa là đã đến đỗ, không phải xe đã rời bãi. Checkout đóng ParkingVisit, giải phóng chỗ và đưa xe ra ngoài Hub. Có yêu cầu đang chờ/giữ hoặc còn kết nối sạc thì phải xử lý trước.
 
-| Method | URL          | Nội dung                                                                                                                       |
-| ------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/workspace` | Dữ liệu theo vai trò để render trang; tài nguyên, đặt chỗ/phiên/lệnh/sự cố phù hợp quyền; thời gian backend và chính sách demo |
-| GET    | `/hubs`      | Lọc `area`, `vehicleType`, `minBattery`, `needsParking`, `needsCharging`, `routeHubIds` phân tách dấu phẩy                     |
-| GET    | `/hubs/:id`  | Chi tiết xe dùng chung, chỗ đỗ và cổng sạc của một Hub                                                                         |
-| GET    | `/network`   | Thông tin tổng hợp mạng, chỉ Operator                                                                                          |
+## Sạc
 
-Giao diện cập nhật dữ liệu mỗi 10 giây khi trang đang hiển thị và không mở hộp thao tác; có nút làm mới thủ công. Bộ đếm giữ chỗ cập nhật mỗi giây; backend là nguồn quyết định bản đặt còn hiệu lực.
+| Method | Path                              | Body / quyền                                                                                     |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| POST   | `/charging/requests`              | Chủ xe cá nhân hoặc Operator cho xe chung: `{vehicleId,hubId,targetBattery,requiredBy?,portId?}` |
+| POST   | `/charging/:reservationId/start`  | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
+| POST   | `/charging/:sessionId/stop`       | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
+| POST   | `/charging/:sessionId/disconnect` | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
 
-## Customer: đặt chỗ, thuê và sạc
+`portId` nếu có là cổng ưu tiên, không phải cấp cổng trực tiếp. Mọi yêu cầu đều WAITING. Giao diện mặc định tự động phân bổ để không vượt hàng đợi.
 
-| Method | URL                                 | JSON                                                  |
-| ------ | ----------------------------------- | ----------------------------------------------------- |
-| POST   | `/reservations/vehicle`             | `{vehicleId}`                                         |
-| POST   | `/reservations/parking`             | `{vehicleId,hubId,spaceId}`                           |
-| DELETE | `/reservations/:id`                 | Hủy bản đặt còn được phép hủy                         |
-| POST   | `/reservations/:id/extend`          | `{extraMinutes}`                                      |
-| POST   | `/reservations/:id/resource`        | `{newResourceId}`                                     |
-| POST   | `/reservations/:id/confirm-parking` | `{}`                                                  |
-| POST   | `/rentals/pickup`                   | `{reservationId,code}`                                |
-| POST   | `/rentals/:id/return`               | `{hubId,spaceId}`                                     |
-| POST   | `/charging/requests`                | `{vehicleId,hubId,portId?,targetBattery,requiredBy?}` |
-| POST   | `/charging/:reservationId/start`    | `{}`                                                  |
+- WAITING → HELD: theo thời điểm cần xe sớm → pin thấp → tạo trước → ID; có xét công suất cả cổng đang giữ và phiên cấp điện.
+- Không có requiredBy: xếp sau yêu cầu có hạn. requiredBy là độ ưu tiên, không phải bảo đảm hoàn thành đúng hạn.
+- HELD có 15 phút để bắt đầu; WAITING có 60 phút hiệu lực. Gia hạn đỗ/sạc tối đa 2 lần, 1–15 phút/lần.
+- Bắt đầu: bản đặt CONFIRMED, phiên ACTIVE, xe/cổng CHARGING.
+- Đạt mục tiêu hoặc dừng sớm: phiên AWAITING_DISCONNECT, ngừng cấp điện; cổng CONNECTED, xe vẫn chưa được lấy hoặc cấp lại.
+- Ngắt: phiên COMPLETED nếu đạt mục tiêu, CANCELLED nếu chủ động dừng; bản đặt COMPLETED, cổng/xe khôi phục theo các quan hệ và sự cố còn tồn tại.
+- Cổng/xe lỗi tạm dừng tăng pin. Có thể dừng và ngắt để xử lý; đóng sự cố không xóa phiên/giữ chỗ còn sống.
 
-`schedule`, `advance`, `expire` được BackgroundJobs gọi trong backend, không cho client tự truyền thời gian để thay đổi nghiệp vụ. Những thao tác mô phỏng thời gian dành riêng cho Operator nằm ở nhóm `/demo`.
+## Thông báo
 
-## Sự cố
+`GET /workspace` trả thông báo của actor, mới nhất trước. `POST /notifications/read` với `{id}` đánh dấu một thông báo thuộc mình; `{}` đánh dấu toàn bộ của mình. Các thông báo cấp cổng, đạt mục tiêu, dừng và ngắt được sinh một lần cho mỗi sự kiện. Lưu RAM, không gửi email/SMS/push ngoài ứng dụng.
 
-| Method | URL                      | JSON/quyền                                                                   |
-| ------ | ------------------------ | ---------------------------------------------------------------------------- |
-| GET    | `/incidents`             | Bộ lọc `status`, `hubId`, `technicianId`; Customer chỉ thấy báo cáo của mình |
-| POST   | `/incidents`             | `{target:{kind,id},description}`; kind là VEHICLE hoặc CHARGING_PORT         |
-| POST   | `/incidents/:id/accept`  | `{}`; Technician, chỉ nhận khi OPEN                                          |
-| POST   | `/incidents/:id/resolve` | `{notes}`; đúng Technician đã nhận                                           |
+## Sự cố và điều phối
 
-Đóng sự cố không xóa bỏ phiên thuê/sạc hoặc lệnh đang chiếm dụng tài nguyên. Trạng thái được khôi phục dựa trên các quan hệ hiện hành.
+| Method    | Path                     | Quyền / body                                                                       |
+| --------- | ------------------------ | ---------------------------------------------------------------------------------- |
+| GET/POST  | `/incidents`             | Lọc `status,hubId,technicianId`; tạo `{target:{kind,id},description}`              |
+| POST      | `/incidents/:id/accept`  | Technician; chỉ khi OPEN                                                           |
+| POST      | `/incidents/:id/resolve` | Technician đã nhận: `{notes}`, CHECK thành công                                    |
+| GET/POST  | `/dispatch`              | Operator tạo `{fromHubId,toHubId,quantity}`; Operator/Technician xem trong phạm vi |
+| GET/PATCH | `/dispatch/:id`          | Xem chi tiết; Operator chỉ sửa lệnh PENDING                                        |
+| DELETE    | `/dispatch/:id`          | Operator chỉ hủy PENDING                                                           |
+| POST      | `/dispatch/:id/accept`   | Technician, bắt đầu IN_TRANSIT                                                     |
+| POST      | `/dispatch/:id/complete` | Đúng Technician, xác minh toàn bộ vị trí/chỗ nhận                                  |
 
-## Điều phối
-
-| Method | URL                      | JSON/quyền                                                                                                             |
-| ------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/dispatch`              | Operator xem lịch sử; Technician xem lệnh chờ hoặc liên quan mình; lọc `hubId`, `status`, `technicianId`, `from`, `to` |
-| GET    | `/dispatch/:id`          | Chi tiết trong phạm vi quyền                                                                                           |
-| POST   | `/dispatch`              | `{fromHubId,toHubId,quantity}`; Operator                                                                               |
-| PATCH  | `/dispatch/:id`          | Cùng DTO, chỉ lệnh PENDING; Operator                                                                                   |
-| DELETE | `/dispatch/:id`          | Chỉ lệnh PENDING; Operator                                                                                             |
-| POST   | `/dispatch/:id/accept`   | `{}`; Technician                                                                                                       |
-| POST   | `/dispatch/:id/complete` | `{}`; đúng Technician đã nhận                                                                                          |
-
-`quantity` là số nguyên dương. Tạo/sửa lệnh giữ đủ xe và chỗ nhận trong cùng `transact`. Nhận lệnh giải phóng chỗ nguồn; chỗ đích vẫn do lệnh giữ. Hoàn tất cần vị trí mô phỏng đúng Hub đích và toàn bộ chỗ nhận hợp lệ. Gửi lặp hoàn tất bởi đúng người nhận không cộng tồn hai lần.
+Sửa lệnh giữ tài nguyên nguyên tử; thất bại giữ nguyên lệnh cũ. Giữ chỗ trả và giữ chỗ điều phối không được chồng nhau.
 
 ## What-if
 
-`POST /what-if`, chỉ Operator, nhận:
+`POST /what-if`, Operator:
 
 ```json
 {
   "type": "DEMAND_SURGE",
-  "targetHubId": "hub-a",
+  "targetHubId": "hub-metro",
   "parameters": { "multiplier": 2 },
   "horizonMinutes": 60,
   "seed": 42
 }
 ```
 
-| Kịch bản          | Tham số                               |
-| ----------------- | ------------------------------------- |
-| DEMAND_SURGE      | `multiplier`: 1–10                    |
-| HUB_FULL          | `additionalVehicles`: số nguyên 0–100 |
-| CHARGING_SURGE    | `multiplier`: 1–10                    |
-| PORT_FAILURE      | `failedPorts`: số nguyên 0–100        |
-| VEHICLE_IMBALANCE | `vehicleLoss`: số nguyên 0–100        |
+| Type              | Parameters                             |
+| ----------------- | -------------------------------------- |
+| DEMAND_SURGE      | `multiplier`: 1–3                      |
+| HUB_FULL          | `{}`; tự giới hạn bởi xe và chỗ hợp lệ |
+| CHARGING_SURGE    | `multiplier`: 1–3                      |
+| PORT_FAILURE      | `failedPorts`: số nguyên 0–20          |
+| VEHICLE_IMBALANCE | `additionalVehicles`: số nguyên 0–20   |
 
-Engine là mô hình quy tắc có biến động giả lập theo PRNG seed. Mỗi phút dự báo đóng góp nhu cầu xe/sạc; các kịch bản thay đổi hệ số nhu cầu hoặc số nguồn lực được khảo sát. Các chỉ số giúp trình diễn luồng phân tích, không phải mô hình AI đã huấn luyện. Snapshot độc lập, kết quả không tự áp dụng vào nguồn lực đang vận hành.
+Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả metrics, comparison, actions, timeline, effects, assumptions và recommendations. Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
 
-## Điều khiển mô phỏng
+## Điều khiển demo
 
-| Method | URL               | Quyền và tác động                                                                                                                               |
-| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/demo/telemetry` | `{vehicleId,hubId,batteryLevel?}`; Operator, chủ xe cá nhân, khách có Rental ACTIVE hoặc Technician đang vận chuyển đúng xe trong lệnh của mình |
-| POST   | `/demo/command`   | `{target:{kind,id},command,success}`; chỉ Operator; command: LOCK/UNLOCK/CHECK                                                                  |
-| POST   | `/demo/advance`   | `{seconds}` từ 1–3600; chỉ Operator; tiến đồng hồ demo và chạy một lượt Jobs                                                                    |
-| POST   | `/demo/reset`     | `{}`; chỉ Operator; tạo lại toàn bộ System và thu hồi các Session                                                                               |
+- `POST /demo/telemetry`: `{vehicleId,hubId,batteryLevel?}`; Operator, chủ xe cá nhân, chủ Rental đang chạy hoặc Technician đang vận chuyển xe đó. Chỉ cập nhật quan sát, không ghi đè nghiệp vụ.
+- `POST /demo/command`: Operator, `{target:{kind,id},command,success}`; UNLOCK/LOCK/CHECK.
+- `POST /demo/advance`: Operator, `{seconds}` 1–3600; tiến thời gian toàn buổi demo và chạy Jobs.
+- `POST /demo/reset`: Operator; tạo lại System và thu hồi mọi session.
 
-Các API mô phỏng tồn tại để thay thế vị trí/cảm biến/phản hồi vật lý trong buổi demo; không gọi thiết bị hoặc dịch vụ bên ngoài.
-
-## Quy ước trạng thái khi triển khai
-
-- Giữ xe: `VehicleReservation HELD`, `Vehicle RESERVED`, chỗ đang chứa xe vẫn `OCCUPIED`.
-- Nhận xe thành công: `Rental ACTIVE`, bản đặt `CONFIRMED`, xe `IN_USE`, giải phóng chỗ nguồn. Mở khóa thất bại không lưu các thay đổi này.
-- Trả xe đã xác minh: hoàn tất Rental/bản đặt, lưu phí/phạt, đưa xe vào đúng chỗ nhận. Nếu vị trí/chỗ đỗ chưa xác nhận, trả `ParkingConflict` với `details.returnConfirmed=false`, phí/phạt dự tính và tiếp tục phiên thuê; không cộng tồn Hub chưa xác nhận. UI hiển thị kết quả và yêu cầu xử lý tiếp.
-- Yêu cầu sạc tự phân bổ: `WAITING` chưa có cổng; khi cấp cổng chuyển `HELD` và bắt đầu hạn giữ 15 phút.
-- Bắt đầu sạc: bản đặt `CONFIRMED`, phiên `ACTIVE`, xe/cổng `CHARGING`. Khi đạt mục tiêu: phiên và bản đặt `COMPLETED`, khôi phục xe/cổng theo ràng buộc hiện hành.
-- `advance` trả số phiên được cập nhật pin trong lượt gọi. `updatedAt` được cập nhật cả khi tạm dừng vì sự cố để không cộng bù thời gian lỗi.
-- `requiredBy` không có được xếp sau các yêu cầu có hạn cần xe; sau đó xét pin thấp và thời điểm tạo.
-- Công suất Hub tính cả các cổng đang giữ và các phiên đang hoạt động. Một giữ chỗ liên quan cổng lỗi vẫn giữ cam kết cho đến khi được giải phóng/hết hạn.
-- Repository trả bản sao; `transact` chạy callback đồng bộ trên draft, commit khi thành công và bỏ draft khi lỗi. Snapshot tách sâu Map, mảng và object.
-- Các bộ giả lập không tự ghi thay đổi nghiệp vụ vào Repository. Đặt vị trí mô phỏng là thay đổi quan sát; Service tiếp tục xác minh trước khi cập nhật trạng thái.
+Background Jobs: hết hạn giữ chỗ → cập nhật sạc → lập lịch. What-if có đồng hồ riêng. Thao tác nghiệp vụ dùng `transact` đồng bộ trên bản draft, lỗi thì bỏ draft; bảo đảm trong một tiến trình, không phải giao dịch cơ sở dữ liệu phân tán.

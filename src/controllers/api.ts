@@ -4,7 +4,7 @@ import { createSystem, type AppContext } from '../system.js';
 import { demoAccounts } from '../data/seed.js';
 import { config } from '../shared/config.js';
 import { ensure, must, numeric, text } from '../shared/errors.js';
-import { actor } from '../shared/business.js';
+import { actor, freeVehicle } from '../shared/business.js';
 import { publicUser } from '../shared/security.js';
 import {
   Role,
@@ -12,6 +12,7 @@ import {
   VehicleOwnership,
   RentalStatus,
   DispatchStatus,
+  HubStatus,
 } from '../models/enums.js';
 import type { HubSearchDTO, IncidentFilterDTO, DispatchFilterDTO } from '../models/types.js';
 function query(req: Request): Record<string, string> {
@@ -100,10 +101,17 @@ export function apiController(context: AppContext): Router {
     res.json({
       user: publicUser(u),
       hubs: x.hubs.search({}),
-      vehicles: [...s.vehicles.values()].filter(
-        (v) =>
-          u.role !== Role.CUSTOMER || v.ownership === VehicleOwnership.SHARED || v.ownerId === u.id,
-      ),
+      vehicles: [...s.vehicles.values()]
+        .filter(
+          (v) =>
+            u.role !== Role.CUSTOMER ||
+            v.ownership === VehicleOwnership.SHARED ||
+            v.ownerId === u.id,
+        )
+        .map((v) => ({
+          ...v,
+          rentable: s.hubs.get(v.currentHubId!)?.status === HubStatus.ACTIVE && freeVehicle(s, v),
+        })),
       spaces: [...s.spaces.values()],
       ports: [...s.ports.values()],
       reservations,
@@ -111,6 +119,13 @@ export function apiController(context: AppContext): Router {
       chargingSessions: [...s.chargingSessions.values()].filter(
         (c) => u.role === Role.OPERATOR || reservationIds.has(c.reservationId),
       ),
+      parkingVisits: [...s.parkingVisits.values()].filter(
+        (v) => u.role === Role.OPERATOR || v.userId === u.id,
+      ),
+      notifications: [...s.notifications.values()]
+        .filter((n) => n.userId === u.id)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 100),
       incidents: x.incidents.list(u.id, {}),
       dispatchOrders: u.role === Role.CUSTOMER ? [] : x.dispatch.list(u.id, {}),
       serverNow: x.now(),
@@ -119,7 +134,15 @@ export function apiController(context: AppContext): Router {
     });
   });
   api.post('/reservations/vehicle', (req, res) =>
-    res.status(201).json(context.current.reservations.reserveVehicle(who(res), req.body.vehicleId)),
+    res
+      .status(201)
+      .json(
+        context.current.reservations.reserveVehicle(
+          who(res),
+          req.body.vehicleId,
+          req.body.returnHubId,
+        ),
+      ),
   );
   api.post('/reservations/parking', (req, res) =>
     res.status(201).json(context.current.reservations.reserveParking(who(res), req.body)),
@@ -145,6 +168,31 @@ export function apiController(context: AppContext): Router {
   api.post('/reservations/:id/confirm-parking', (req, res) =>
     res.json(context.current.reservations.confirmParking(who(res), String(req.params.id))),
   );
+  api.post('/reservations/:id/destination', (req, res) =>
+    res.json(
+      context.current.reservations.changeDestination(
+        who(res),
+        String(req.params.id),
+        req.body.hubId,
+      ),
+    ),
+  );
+  api.post('/vehicles/:id/checkout', (req, res) =>
+    res.json(context.current.reservations.checkoutParking(who(res), String(req.params.id))),
+  );
+  api.post('/notifications/read', (req, res) => {
+    const userId = who(res);
+    context.current.repo.transact((s) => {
+      if (req.body.id) {
+        const n = must(s.notifications, text(req.body.id, 'Thông báo'));
+        ensure(n.userId === userId, 'Forbidden', 'Thông báo không thuộc tài khoản này.', 403);
+        n.readAt ??= context.current.now();
+      } else
+        for (const n of s.notifications.values())
+          if (n.userId === userId) n.readAt ??= context.current.now();
+    });
+    res.json({ ok: true });
+  });
   api.post('/rentals/pickup', (req, res) =>
     res
       .status(201)
@@ -158,6 +206,12 @@ export function apiController(context: AppContext): Router {
   );
   api.post('/charging/:id/start', (req, res) =>
     res.status(201).json(context.current.charging.start(who(res), String(req.params.id))),
+  );
+  api.post('/charging/:id/stop', (req, res) =>
+    res.json(context.current.charging.stop(who(res), String(req.params.id))),
+  );
+  api.post('/charging/:id/disconnect', (req, res) =>
+    res.json(context.current.charging.disconnect(who(res), String(req.params.id))),
   );
   api.get('/incidents', (req, res) =>
     res.json(context.current.incidents.list(who(res), query(req) as IncidentFilterDTO)),

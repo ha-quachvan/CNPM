@@ -19,7 +19,14 @@ import type {
   NetworkSummaryDTO,
 } from '../models/types.js';
 import { InMemoryRepository } from '../repositories/InMemoryRepository.js';
-import { actor, freeVehicle, fault, freeSpace, powerUsed } from '../shared/business.js';
+import {
+  actor,
+  freeVehicle,
+  fault,
+  freeSpace,
+  powerUsed,
+  totalChargingPower,
+} from '../shared/business.js';
 import { must, numeric, ensure } from '../shared/errors.js';
 export class HubService {
   constructor(private repo: InMemoryRepository) {}
@@ -104,6 +111,18 @@ export class HubService {
     const ports = [...s.ports.values()].filter((p) => p.hubId === hubId);
     return {
       ...h,
+      chargingBudgetKw: totalChargingPower(s, h.id),
+      chargingTotalKw: totalChargingPower(s, h.id),
+      chargingActiveKw: ports
+        .filter((p) => p.status === PortStatus.CHARGING && !fault(s, 'CHARGING_PORT', p.id))
+        .reduce((sum, p) => sum + p.powerKw, 0),
+      totalPorts: ports.length,
+      activePorts: ports.filter((p) => p.status === PortStatus.CHARGING).length,
+      heldPorts: ports.filter((p) => p.status === PortStatus.HELD).length,
+      connectedPorts: ports.filter((p) => p.status === PortStatus.CONNECTED).length,
+      faultPorts: ports.filter(
+        (p) => p.status === PortStatus.FAULT || fault(s, 'CHARGING_PORT', p.id),
+      ).length,
       availableVehicles: h.status === HubStatus.ACTIVE ? vehicles.length : 0,
       freeSpaces: h.status === HubStatus.ACTIVE ? spaces.filter((p) => freeSpace(s, p)).length : 0,
       totalSpaces: spaces.length,
@@ -113,7 +132,12 @@ export class HubService {
           : ports.filter((p) => p.status === PortStatus.FREE && !fault(s, 'CHARGING_PORT', p.id))
               .length,
       chargingUsedKw: powerUsed(s, h.id),
-      chargingAvailableKw: Math.max(0, h.chargingBudgetKw - powerUsed(s, h.id)),
+      chargingAvailableKw:
+        h.status === HubStatus.ACTIVE
+          ? ports
+              .filter((p) => p.status === PortStatus.FREE && !fault(s, 'CHARGING_PORT', p.id))
+              .reduce((sum, p) => sum + p.powerKw, 0)
+          : 0,
       batteryAverage: vehicles.length
         ? Math.round(vehicles.reduce((n, v) => n + v.batteryLevel, 0) / vehicles.length)
         : 0,

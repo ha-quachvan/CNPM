@@ -48,13 +48,13 @@ Google/Clerk và mã khôi phục mật khẩu là **giả lập**; không gửi
 
 - **Thuê xe:** chọn xe và Hub trả; giữ xe cùng chỗ đích trong một giao dịch. Giữ xe nhận trong 15 phút; chỗ trả tiếp tục được giữ sau khi nhận. Có thể đổi Hub trả nếu giữ được chỗ mới. Phạt chỉ khi trả khác **Hub đã đăng ký**, không phải khác Hub nhận.
 - **Xe cá nhân:** đặt chỗ → xác nhận đỗ → sạc nếu cần → ngắt kết nối → lấy xe. Lịch sử vào/ra được giữ; lấy xe giải phóng chỗ.
-- **Sạc:** mọi yêu cầu vào hàng đợi. Ưu tiên thời điểm cần xe → pin thấp → yêu cầu đến trước. Cấp cổng có xét công suất và thời hạn giữ 15 phút. Đạt pin mục tiêu hoặc dừng sạc thì chờ ngắt kết nối; cổng chỉ rảnh sau xác nhận ngắt. Operator quản lý sạc đội xe dùng chung và hỗ trợ các phiên tại Hub.
+- **Sạc:** công suất Hub bằng tổng định mức các cổng, không cấu hình một giới hạn thấp hơn. Mỗi cổng chỉ phục vụ một xe; hàng chờ xét hạn cần xe → pin thấp → yêu cầu đến trước, cấp khi có cổng trống phù hợp. Cổng được giữ 15 phút để bắt đầu. Đạt mục tiêu hoặc dừng sạc vẫn phải rút dây để giải phóng cổng. Customer thao tác xe cá nhân; Operator giám sát và đăng ký yêu cầu cho đội xe; Technician bắt đầu/dừng/ngắt sạc xe dùng chung tại Hub. Nhật ký Operator là nhật ký toàn hệ thống, chỉ đọc và mặc định thu gọn.
 - **Thông báo:** được cấp cổng, đạt mục tiêu, dừng/ngắt sạc và hoàn tất dịch vụ. Lưu trong RAM, có trạng thái đã đọc; giao diện cập nhật định kỳ 3 giây khi đủ điều kiện.
 - **Sự cố:** báo → Technician nhận → kiểm tra mô phỏng → hoàn tất; không tự giải phóng tài nguyên còn bận.
 - **Điều phối:** Operator giữ xe nguồn và chỗ nhận; Technician nhận, vận chuyển và bàn giao sau xác minh vị trí.
-- **What-if:** mô phỏng toàn mạng lưới theo bước 5 phút. So sánh bình thường / có tình huống / có phương án được chạy lại. Khuyến nghị có thời điểm, nguồn, đích và giới hạn tài nguyên; không tự áp dụng vào hệ thống.
+- **What-if:** giữ mô phỏng toàn mạng lưới theo bước 5 phút và heuristic điều phối có ràng buộc. Màn hình chính giải thích tình huống, ảnh hưởng, các bước của một kế hoạch và kết quả. Tình huống thuê xe hiển thị lượt chưa phục vụ trước/sau; tình huống sạc hiển thị hàng chờ, trễ hạn và thời gian chờ. Bảng so sánh ba lượt chạy, diễn biến và giới hạn nằm trong phần mở rộng; không tự áp dụng vào vận hành.
 
-Trong mô hình không có phần cứng, xác nhận đến nơi trong hộp trả/bàn giao xe cung cấp sự kiện vị trí mô phỏng. Công cụ Operator cho phép tạo lỗi thiết bị để minh họa nhánh thất bại.
+Trong mô hình không có phần cứng, xác nhận đến nơi trong hộp trả/bàn giao xe cung cấp sự kiện vị trí mô phỏng. Công cụ Operator chỉ có tiến thời gian và đặt lại dữ liệu. Bộ mô phỏng thiết bị vẫn được dùng trong backend và kiểm thử nhánh lỗi, không cần thao tác UNLOCK/LOCK/CHECK trong buổi demo.
 
 ## Dữ liệu mẫu
 
@@ -72,7 +72,7 @@ Thêm 2 xe cá nhân ngoài Hub: tổng **54 xe, 11 tài khoản**. Xe tại Hub
 
 - `personal-1`, biển `59-T1 123.45`: của Customer chính, pin 35%, đang ở Metro; phù hợp demo sạc.
 - `personal-2`, biển `59-T2 678.90`: của Customer chính, đang ngoài Hub; phù hợp demo gửi–lấy.
-- KTX A: một phiên sạc của `customer3`, hai yêu cầu của `customer4` và `customer5`; ngân sách 3.3 kW đang được dùng hết. Có cổng vật lý trống nhưng chưa đủ công suất để cấp.
+- KTX A: tổng công suất lắp đặt **12.1 kW**, ba cổng đang sạc (**8.8 kW**) và một cổng lỗi. Cổng c1 phục vụ xe của `customer3`; c2/c3 phục vụ hai xe dùng chung. Hai yêu cầu của `customer4` và `customer5` chờ vì hết cổng sử dụng được. Yêu cầu customer5 được ưu tiên dù gửi sau, vì hạn cần xe sớm hơn. Technician có thể dừng rồi ngắt c2 để minh họa cấp cổng cho hàng chờ.
 - Có hai sự cố và lịch sử thuê, gửi xe, điều phối. Khu bảo trì không được cấp tài nguyên mới.
 
 Backend khởi động lại hoặc Operator đặt lại demo sẽ nạp lại dữ liệu và thu hồi các phiên. Công cụ tiến thời gian ảnh hưởng mọi tài khoản; What-if có đồng hồ riêng và không làm hết hạn các đặt chỗ thật.
@@ -92,7 +92,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-Có thể đặt `PLAYWRIGHT_CHROMIUM_EXECUTABLE` để dùng Chromium đã cài. Kiểm tra UI gồm các luồng ba vai trò, cả năm What-if và 72 tổ hợp trang/kích thước; ảnh ở `artifacts/`, không đưa vào Git.
+Có thể đặt `PLAYWRIGHT_CHROMIUM_EXECUTABLE` để dùng Chromium đã cài. Kiểm tra UI gồm các luồng ba vai trò, cả năm What-if và 75 tổ hợp trang/kích thước; ảnh ở `artifacts/`, không đưa vào Git.
 
 ## Tài liệu
 

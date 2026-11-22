@@ -1879,3 +1879,56 @@ tbody tr:hover {
     font-size: 27px;
   }
 }
+
+/* The primary What-if result reads as a short explanation and one actionable plan. */
+.analysis-content .result-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 22px 0 28px;
+}
+.whatif-story h3 {
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+.result-context p,
+.plan-steps p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.plan-steps {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 22px;
+}
+.plan-steps li {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.plan-step-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.plan-steps .metric-note {
+  margin-bottom: 0;
+}
+.notice.caution {
+  background: #fff9ed;
+  border-color: #efd8a7;
+  color: #76521b;
+}
+.charging-log {
+  padding: 20px 24px;
+}
+.charging-log > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.charging-log[open] > summary {
+  margin-bottom: 18px;
+}
+@media (max-width: 900px) {
+  .analysis-content .result-grid.three {
+    grid-template-columns: 1fr;
+  }
+}

@@ -50,9 +50,9 @@ Dùng báo cáo mẫu `incident-demo` về khóa xe tại Bách khoa. Technician
 ## 5:50–6:50 — What-if
 
 1. Operator → What-if → Nhu cầu di chuyển tăng tại Metro, hệ số 2, 60 phút, seed 42.
-2. Bấm chạy một lần. Ba lượt tính nội bộ trả bảng so sánh.
-3. Đọc lượt phục vụ/chưa phục vụ trước và sau phương án.
-4. Chỉ vào một lệnh: nguồn, đích, số xe và phút đến.
+2. Bấm chạy một lần. Đọc phần “Điều gì thay đổi?” để phân biệt nhu cầu ở Metro với tổng lượt toàn mạng lưới.
+3. Đọc ba số chính: chưa phục vụ nếu giữ nguyên, chưa phục vụ với kế hoạch, phục vụ thêm.
+4. Chỉ vào một bước của kế hoạch: nguồn, đích, số xe và phút đến trong mô phỏng. Bảng ba lượt chạy nằm trong mục mở rộng, không cần mở trong demo 8 phút.
 5. Nếu có cảnh báo đánh đổi hoặc phương án chưa cải thiện, đọc đúng kết quả. Không khẳng định mọi tình huống đều có giải pháp tốt hơn.
 
 Câu giải thích ngắn: “Mô hình tiến mỗi bước 5 phút, cập nhật xe đi–đến và sạc. Khi thiếu xe hoặc chỗ, thử phương án trong giới hạn nguồn lực rồi chạy lại. Kết quả không tự áp dụng vào mạng lưới.”
@@ -73,9 +73,15 @@ Chốt ba ý: quản lý trạng thái nhất quán; phân bổ tài nguyên có
 
 ## Hàng đợi sạc: chuẩn bị cho Q&A
 
-KTX A có cổng `hub-a-c1` đang sạc xe của `customer3`, ngân sách 3.3 kW dùng hết. Yêu cầu `charge-seed-wait-2` cần xe sớm hơn `charge-seed-wait-1`, nên được cấp trước dù không chỉ xét thứ tự tạo.
+KTX A có 4 cổng: c1 (3.3 kW) sạc xe cá nhân của `customer3`; c2 (3.3 kW) và c3 (2.2 kW) sạc xe dùng chung; c4 (3.3 kW) bị lỗi. Tổng lắp đặt **12.1 kW**, hiện đang cấp **8.8 kW**. Hai yêu cầu chờ vì hết cổng sử dụng được, dù tổng lắp đặt vẫn lớn hơn công suất đang cấp.
 
-Operator → Quản lý sạc → Dừng phiên nền rồi ngắt kết nối. Quan sát yêu cầu đến hạn sớm được cấp cổng trước. Các cổng trống khác vẫn có thể phải chờ vì ngân sách công suất đã được giữ. Một cổng chờ ngắt kết nối không được cấp lại cho xe khác.
+1. Operator → **Giám sát sạc**: xem ba cổng đang sạc, một cổng lỗi; không có nút điều khiển phiên của khách hàng. Nhật ký toàn hệ thống ở cuối trang, mặc định thu gọn.
+2. Technician → **Sạc đội xe** → Dừng phiên xe **EB-105** (`session-seed-fleet-1`, cổng c2).
+3. Chỉ rõ c2 đã ngừng cấp điện nhưng còn chờ rút dây; hai yêu cầu vẫn chưa được cấp cổng.
+4. Technician → Ngắt kết nối. Làm mới Operator: yêu cầu `charge-seed-wait-2` của customer5 được cấp c2 trước yêu cầu `charge-seed-wait-1` của customer4, vì hạn cần xe sớm hơn dù gửi sau.
+5. Nếu cần bắt đầu phiên đã cấp này, đăng nhập **customer5@hub.local**, vào Sạc xe rồi Bắt đầu sạc. Technician chỉ thao tác đội xe dùng chung, không thay khách sạc xe cá nhân.
+
+Để demo một phiên đội xe mới: Operator đăng ký sạc cho một xe dùng chung tại Hub còn cổng → Technician vào Sạc đội xe, Bắt đầu sạc → dừng/ngắt khi hoàn tất. Không cần thực hiện toàn bộ nhánh này trong 8 phút; dùng cho Q&A.
 
 ## Q&A nên nắm
 
@@ -83,7 +89,9 @@ Operator → Quản lý sạc → Dừng phiên nền rồi ngắt kết nối. 
 - Hai khách đặt cùng xe? Backend kiểm tra và cập nhật đồng bộ qua bản draft; chỉ một yêu cầu thành công trong một tiến trình.
 - Làm sao biết xe đến? Trong demo, xác nhận đến nơi cung cấp quan sát giả lập; Service kiểm tra trước khi cập nhật nghiệp vụ.
 - Vì sao pin đủ nhưng cổng chưa rảnh? Còn đầu nối; phải ngắt kết nối mới giải phóng.
-- Vì sao cổng trống nhưng chưa cấp? Còn điều kiện công suất, quyền sử dụng và ưu tiên.
+- Vì sao còn công suất mà vẫn chờ? Công suất lắp đặt có thể thuộc cổng lỗi hoặc cổng chưa rút dây; mỗi cổng chỉ phục vụ một xe. Không phải chờ vì hạn mức điện thấp hơn tổng cổng. Nếu cổng thực sự trống, đúng Hub/cổng ưu tiên và xe hợp lệ, bộ lập lịch sẽ cấp theo thứ tự ưu tiên.
+- Operator có xe riêng trong nhật ký sạc? Không. Đây là nhật ký toàn hệ thống có tên người yêu cầu và Hub. Operator chỉ giám sát, Technician xử lý sạc đội xe; chủ xe xử lý sạc cá nhân.
+- Công cụ demo còn gì? Tiến thời gian và đặt lại dữ liệu. Các phản hồi thiết bị vẫn được giả lập tự động trong backend; không cần thao tác ba lệnh thiết bị trên UI.
 - What-if có phải AI? Không; mô hình theo bước thời gian, lịch nhu cầu giả lập và heuristic có ràng buộc.
 - Có bảo đảm tối ưu? Không. Kết quả được chạy lại, thể hiện cả đánh đổi và khả năng chưa tìm được phương án cải thiện.
 - Tại sao không lấy lượt thuê trừ số xe? Lượt trong cả kỳ khác lượng xe tại một thời điểm; xe có thể phục vụ lại sau khi đến nơi.

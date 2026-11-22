@@ -39,7 +39,7 @@ const navItems = {
     ['overview', 'Tổng quan mạng lưới', 'grid'],
     ['hubs', 'Quản lý Hub', 'building'],
     ['dispatch', 'Điều phối xe', 'truck'],
-    ['charging', 'Quản lý sạc', 'bolt'],
+    ['charging', 'Giám sát sạc', 'bolt'],
     ['incidents', 'Theo dõi sự cố', 'alert'],
     ['what-if', 'Mô phỏng What-if', 'flask'],
     ['demo', 'Công cụ demo', 'settings'],
@@ -48,6 +48,7 @@ const navItems = {
     ['overview', 'Công việc hôm nay', 'grid'],
     ['incidents', 'Xử lý sự cố', 'alert'],
     ['dispatch', 'Lệnh điều phối', 'truck'],
+    ['charging', 'Sạc đội xe', 'bolt'],
     ['hubs', 'Tra cứu Hub', 'pin'],
   ],
 };
@@ -389,8 +390,11 @@ function notificationsView() {
   );
 }
 function chargingView() {
-  const sessions = d().chargingSessions;
-  const live = sessions.filter((c) => ['ACTIVE', 'AWAITING_DISCONNECT'].includes(c.status));
+  const operating = role() === 'OPERATOR';
+  const technician = role() === 'TECHNICIAN';
+  const live = d().chargingSessions.filter((c) =>
+    ['ACTIVE', 'AWAITING_DISCONNECT'].includes(c.status),
+  );
   const queue = d()
     .reservations.filter((r) => r.kind === 'CHARGING' && ['WAITING', 'HELD'].includes(r.status))
     .sort(
@@ -398,72 +402,93 @@ function chargingView() {
         (a.requiredBy ?? Infinity) - (b.requiredBy ?? Infinity) ||
         (find('vehicles', a.vehicleId)?.batteryLevel ?? 100) -
           (find('vehicles', b.vehicleId)?.batteryLevel ?? 100) ||
-        a.createdAt - b.createdAt,
+        a.createdAt - b.createdAt ||
+        a.id.localeCompare(b.id),
     );
-  const completed = sessions
-    .filter((c) => ['COMPLETED', 'CANCELLED'].includes(c.status))
+  const completed = d()
+    .chargingSessions.filter((c) => ['COMPLETED', 'CANCELLED'].includes(c.status))
     .sort((a, b) => b.endedAt - a.endedAt);
-  const operating = role() === 'OPERATOR';
+  const requester = (r) =>
+    operating || technician
+      ? `<span class="sub">Người yêu cầu: ${esc(r.requesterName)}</span>`
+      : '';
+  const history = completed.length
+    ? table(
+        ['Xe / Hub', 'Người yêu cầu', 'Mục tiêu', 'Kết thúc / kết quả'],
+        completed.map((c) => {
+          const r = find('reservations', c.reservationId);
+          return `<tr><td><strong>${esc(vehicleName(c.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${esc(c.portId)}</span></td><td>${esc(r.requesterName)}</td><td>${c.targetBattery}%</td><td>${date(c.endedAt)}<span class="sub">${c.stopReason === 'MANUAL' ? 'Dừng trước mục tiêu' : 'Đạt mục tiêu'}</span></td></tr>`;
+        }),
+      )
+    : empty('Chưa có phiên kết thúc', 'Phiên được ghi nhận sau khi đã ngắt kết nối.');
   return (
     heading(
-      operating ? 'Điều hành sạc' : 'Sạc xe',
-      'Theo dõi yêu cầu, cấp cổng và tiến trình sạc.',
-      button(operating ? 'Sạc xe dùng chung' : 'Yêu cầu sạc', 'charge-new', '', 'primary'),
+      operating ? 'Giám sát sạc' : technician ? 'Sạc đội xe dùng chung' : 'Sạc xe cá nhân',
+      operating
+        ? 'Theo dõi cổng, hàng chờ và tiến trình trên toàn mạng lưới.'
+        : technician
+          ? 'Thao tác tại Hub cho xe dùng chung theo yêu cầu do Operator đăng ký.'
+          : 'Quản lý yêu cầu và phiên sạc xe của bạn.',
+      technician
+        ? ''
+        : button(
+            operating ? 'Đăng ký sạc xe dùng chung' : 'Yêu cầu sạc',
+            'charge-new',
+            '',
+            'primary',
+          ),
     ) +
-    `<div class="cards">${stat('Đang cấp điện', live.filter((c) => c.status === 'ACTIVE').length, '', 'Cập nhật pin theo công suất')}${stat('Đang chờ cổng', queue.filter((r) => r.status === 'WAITING').length, '', 'Phân bổ theo thời điểm cần xe và pin')}${stat('Chờ ngắt kết nối', live.filter((c) => c.status === 'AWAITING_DISCONNECT').length, '', 'Cổng chưa thể cấp cho xe khác')}${stat('Đã kết thúc', completed.length, '', 'Bao gồm hoàn tất và dừng trước mục tiêu')}</div>` +
+    `<div class="cards three">${stat('Đang cấp điện', live.filter((c) => c.status === 'ACTIVE').length, '', operating ? 'Phiên trên toàn mạng lưới' : 'Phiên đang hoạt động')}${stat('Đang chờ cấp cổng', queue.filter((r) => r.status === 'WAITING').length, '', 'Ưu tiên theo hạn cần xe, pin và thứ tự đến')}${stat('Chờ rút dây', live.filter((c) => c.status === 'AWAITING_DISCONNECT').length, '', 'Đã ngừng cấp điện, cổng vẫn bị chiếm')}</div>` +
     (operating
       ? panel(
-          'Nguồn lực sạc',
-          'Cổng trống còn cần đủ ngân sách công suất',
+          'Trạng thái cổng theo Hub',
+          'Tổng công suất bằng tổng định mức các cổng được lắp đặt. Cổng lỗi vẫn thuộc tổng lắp đặt nhưng không thể sử dụng.',
           table(
-            ['Hub', 'Cổng trống', 'Công suất cam kết / giới hạn'],
+            ['Hub', 'Trống', 'Đang sạc', 'Giữ / chờ rút dây', 'Lỗi', 'Công suất'],
             d().hubs.map(
               (h) =>
-                `<tr><td>${esc(h.name)}</td><td>${h.freePorts}</td><td>${Number(h.chargingUsedKw).toFixed(1)} / ${h.chargingBudgetKw} kW</td></tr>`,
+                `<tr><td><strong>${esc(h.name)}</strong><span class="sub">${h.totalPorts} cổng · ${esc(label(h.status))}</span></td><td>${h.freePorts}</td><td>${h.activePorts}</td><td>${h.heldPorts} / ${h.connectedPorts}</td><td>${h.faultPorts}</td><td><strong>${Number(h.chargingTotalKw).toFixed(1)} kW lắp đặt</strong><span class="sub">Đang cấp điện: ${Number(h.chargingActiveKw).toFixed(1)} kW</span></td></tr>`,
             ),
           ),
         )
       : '') +
     panel(
       'Phiên đang phục vụ',
-      'Đạt mục tiêu hoặc dừng sạc → xác nhận ngắt kết nối → giải phóng cổng',
+      operating
+        ? 'Khách hàng thao tác xe cá nhân; kỹ thuật viên thao tác xe dùng chung tại Hub.'
+        : 'Bắt đầu sạc → đạt mục tiêu hoặc dừng → rút dây để giải phóng cổng.',
       live.length
         ? table(
-            ['Xe / Hub', 'Tiến trình', 'Trạng thái', 'Thao tác'],
+            operating
+              ? ['Xe / Hub', 'Tiến trình', 'Trạng thái']
+              : ['Xe / Hub', 'Tiến trình', 'Trạng thái', 'Thao tác'],
             live.map((c) => {
               const v = find('vehicles', c.vehicleId);
               const r = find('reservations', c.reservationId);
-              return `<tr><td><strong>${esc(vehicleName(c.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${esc(c.portId)}</span></td><td>${battery(v.batteryLevel, c.targetBattery)}<span class="sub">Bắt đầu ${date(c.startedAt)}</span></td><td>${badge(c.status)}</td><td>${c.status === 'ACTIVE' ? button('Dừng sạc', 'charge-stop', c.id, 'secondary small') : button('Ngắt kết nối', 'charge-disconnect', c.id, 'primary small')}</td></tr>`;
+              return `<tr><td><strong>${esc(vehicleName(c.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${esc(c.portId)}</span>${requester(r)}</td><td>${battery(v.batteryLevel, c.targetBattery)}<span class="sub">Bắt đầu ${date(c.startedAt)}</span></td><td>${badge(c.status)}</td>${operating ? '' : `<td>${c.status === 'ACTIVE' ? button('Dừng sạc', 'charge-stop', c.id, 'secondary small') : button('Ngắt kết nối', 'charge-disconnect', c.id, 'primary small')}</td>`}</tr>`;
             }),
           )
-        : empty('Chưa có phiên đang phục vụ', 'Gửi yêu cầu và bắt đầu sau khi được cấp cổng.'),
+        : empty(
+            'Chưa có phiên đang phục vụ',
+            technician
+              ? 'Bắt đầu sau khi yêu cầu xe dùng chung được cấp cổng.'
+              : 'Phiên sẽ xuất hiện khi xe bắt đầu sạc.',
+          ),
     ) +
     panel(
-      'Hàng đợi và cổng đã cấp',
-      'Ưu tiên thời điểm cần xe sớm hơn → pin thấp hơn → yêu cầu đến trước',
+      'Hàng chờ và cổng đã cấp',
+      'Xét riêng tại mỗi Hub: hạn cần xe sớm → pin thấp → yêu cầu đến trước. Cổng phải trống và không lỗi.',
       queue.length
         ? table(
-            ['Thứ tự', 'Xe / Hub', 'Cần xe trước', 'Trạng thái / lý do', 'Thao tác'],
-            queue.map(
-              (r, i) =>
-                `<tr><td>${i + 1}</td><td><strong>${esc(vehicleName(r.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${Math.round(find('vehicles', r.vehicleId)?.batteryLevel ?? 0)}%</span></td><td>${r.requiredBy ? date(r.requiredBy) : 'Không khai báo'}</td><td>${badge(r.status)}<span class="sub">${esc(r.waitingReason || r.portId || '')}${r.status === 'HELD' ? ` · ${countdown(r)}` : ''}</span></td><td><div class="actions">${r.status === 'HELD' ? button('Bắt đầu sạc', 'charge-start', r.id, 'primary small') : ''}${r.userId === d().user.id ? button('Hủy', 'reservation-cancel', r.id, 'ghost small') : ''}</div></td></tr>`,
-            ),
+            ['Ưu tiên tại Hub', 'Xe / Hub', 'Cần xe trước', 'Trạng thái / lý do', 'Thao tác'],
+            queue.map((r) => {
+              const rank = r.queuePosition;
+              return `<tr><td>${r.status === 'HELD' ? 'Đã cấp cổng' : `#${rank}`}</td><td><strong>${esc(vehicleName(r.vehicleId))}</strong><span class="sub">${esc(hubName(r.hubId))} · ${Math.round(find('vehicles', r.vehicleId)?.batteryLevel ?? 0)}%</span>${requester(r)}</td><td>${r.requiredBy ? date(r.requiredBy) : 'Không khai báo'}</td><td>${badge(r.status)}<span class="sub">${esc(r.waitingReason || r.portId || '')}${r.status === 'HELD' ? ` · ${countdown(r)}` : ''}</span></td><td><div class="actions">${!operating && r.status === 'HELD' ? button('Bắt đầu sạc', 'charge-start', r.id, 'primary small') : ''}${own(r) ? button('Hủy yêu cầu', 'reservation-cancel', r.id, 'ghost small') : ''}</div></td></tr>`;
+            }),
           )
         : empty('Không có yêu cầu chờ', 'Yêu cầu mới sẽ xuất hiện tại đây.'),
     ) +
-    panel(
-      'Lịch sử sạc',
-      'Cổng chỉ được giải phóng sau khi xác nhận ngắt kết nối',
-      completed.length
-        ? table(
-            ['Xe / cổng', 'Mục tiêu', 'Kết thúc', 'Kết quả'],
-            completed.map(
-              (c) =>
-                `<tr><td>${esc(vehicleName(c.vehicleId))}<span class="sub">${esc(c.portId)}</span></td><td>${c.targetBattery}%</td><td>${date(c.endedAt)}</td><td>${c.stopReason === 'MANUAL' ? 'Dừng theo yêu cầu' : 'Đạt mục tiêu'}</td></tr>`,
-            ),
-          )
-        : empty('Chưa có phiên kết thúc', 'Các phiên đã ngắt kết nối sẽ được hiển thị tại đây.'),
-    )
+    `<details class="panel charging-log"><summary>${operating ? 'Nhật ký phiên sạc toàn hệ thống' : technician ? 'Nhật ký sạc đội xe dùng chung' : 'Lịch sử sạc xe của bạn'} <span class="muted">(${completed.length})</span></summary><p class="metric-note">${operating ? 'Nhật ký vận hành của tất cả khách hàng và đội xe, chỉ dùng để tra cứu.' : 'Chỉ ghi nhận các phiên đã kết thúc và rút dây.'}</p>${history}</details>`
   );
 }
 
@@ -560,77 +585,140 @@ function whatIfView() {
       'Phân tích What-if',
       'Khảo sát tác động và kiểm tra phương án điều phối trước khi quyết định.',
     ) +
-    `<div class="whatif-layout"><section class="panel scenario-panel"><div class="panel-head"><div><h2>Thiết lập tình huống</h2><p>Dữ liệu mô phỏng theo bước 5 phút</p></div></div><form id="whatif-form" class="panel-body">${field('type', 'Tình huống', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field('targetHubId', 'Hub được khảo sát', select('targetHubId', hubOptions(f.targetHubId)))}<div id="scenario-param">${scenarioParameter(f.type, f.parameter)}</div>${field('horizonMinutes', 'Khoảng khảo sát', select('horizonMinutes', [30, 60, 120].map((v) => option(String(v), `${v} phút`, String(f.horizonMinutes))).join('')))}<details class="model-details"><summary>Thiết lập tái hiện</summary>${field('seed', 'Seed', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Cùng trạng thái, tham số và seed cho cùng chỉ số.')}</details><p class="metric-note">Chạy trên bản sao mạng lưới. Kết quả không tự tạo lệnh hoặc thay đổi dữ liệu vận hành.</p><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">Chạy mô phỏng</button></form></section><div class="analysis-content">${state.result ? renderResult(state.result) : panel('Kết quả phân tích', 'So sánh điều kiện bình thường, tình huống và phương án thử nghiệm', empty('Chọn tình huống để bắt đầu', 'Hệ thống tính nhu cầu theo thời gian, kiểm tra xe và chỗ tiếp nhận, rồi đánh giá phương án khả thi.'))}</div></div>`
+    `<div class="whatif-layout"><section class="panel scenario-panel"><div class="panel-head"><div><h2>Thiết lập tình huống</h2><p>Thay đổi một điều kiện để so sánh tác động</p></div></div><form id="whatif-form" class="panel-body">${field('type', 'Tình huống', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field('targetHubId', 'Hub xảy ra tình huống', select('targetHubId', hubOptions(f.targetHubId)))}<div id="scenario-param">${scenarioParameter(f.type, f.parameter)}</div>${field('horizonMinutes', 'Khoảng khảo sát', select('horizonMinutes', [30, 60, 120].map((v) => option(String(v), `${v} phút`, String(f.horizonMinutes))).join('')))}<details class="model-details"><summary>Thiết lập tái hiện</summary>${field('seed', 'Seed', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Cùng trạng thái, tham số và seed cho cùng chỉ số.')}</details><p class="metric-note">Chạy trên bản sao mạng lưới. Kết quả không tự tạo lệnh hoặc thay đổi dữ liệu vận hành.</p><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">Chạy mô phỏng</button></form></section><div class="analysis-content">${state.result ? renderResult(state.result) : panel('Kết quả phân tích', 'So sánh điều kiện bình thường, tình huống và phương án thử nghiệm', empty('Chọn tình huống để bắt đầu', 'Hệ thống tính nhu cầu theo thời gian, kiểm tra xe và chỗ tiếp nhận, rồi đánh giá phương án khả thi.'))}</div></div>`
   );
 }
 
 function renderResult(r) {
-  const c = r.comparison;
+  const { baseline, scenario: before, coordinated: after } = r.comparison;
+  const scope = r.scope;
+  const charging = ['CHARGING_SURGE', 'PORT_FAILURE'].includes(scope.scenarioType);
+  const extra = after.servedTrips - before.servedTrips;
+  const last = r.timeline.at(-1);
+  const shortage = (m) => Math.max(0, m.unservedTrips - m.blockedReturns);
   const rows = [
-    ['Yêu cầu thuê', 'requestedTrips'],
+    ['Yêu cầu thuê (lượt)', 'requestedTrips'],
     ['Lượt được phục vụ', 'servedTrips'],
     ['Lượt chưa phục vụ', 'unservedTrips'],
-    ['Bị chặn do thiếu chỗ trả', 'blockedReturns'],
-    ['Yêu cầu sạc còn chờ', 'waitingCharges'],
-    ['Chờ sạc lớn nhất (phút)', 'maxChargeWaitMinutes'],
-    ['Sạc không kịp thời điểm cần xe', 'lateCharges'],
+    ['Trong đó: thiếu chỗ trả', 'blockedReturns'],
+    ['Lượt đồng ý đổi Hub trả', 'redirectedTrips'],
+    ['Chờ bắt đầu sạc cuối kỳ', 'waitingCharges'],
+    ['Chờ sạc lâu nhất đã quan sát (phút)', 'maxChargeWaitMinutes'],
+    ['Không đạt pin đúng hạn cần xe', 'lateCharges'],
     ['Yêu cầu sạc hết hạn', 'expiredCharges'],
     ['Phiên đạt pin mục tiêu', 'completedCharges'],
   ];
-  const last = r.timeline.at(-1);
-  return panel(
-    'Kết quả phân tích',
-    `${label(state.scenarioForm?.type)} · ${hubName(state.scenarioForm?.targetHubId)} · ${r.metrics.horizonMinutes} phút`,
-    `<div class="panel-body"><div class="analysis-outcome"><span class="badge ${c.improved ? 'good' : 'blue'}">${c.improved ? 'Phương án cải thiện lượt phục vụ' : 'Cần xem xét tác động'}</span><span class="muted small">${date(r.generatedAt)} · ${r.metrics.totalVehicles} xe trong mô hình</span></div><p class="metric-note">${r.effects.map(esc).join(' ')}</p><div class="result-grid">${stat('Yêu cầu trong tình huống', c.scenario.requestedTrips, '', 'Lượt thuê trong toàn khoảng khảo sát')}${stat('Chưa phục vụ trước / sau', `${c.scenario.unservedTrips} / ${c.coordinated.unservedTrips}`, '', 'Tính từ hai lượt chạy độc lập')}${stat('Phương án được thử', r.actions.length, '', 'Có nguồn, đích và thời điểm cụ thể')}${stat('Sạc trễ mốc cần xe', c.scenario.lateCharges, '', 'Không bảo đảm mọi yêu cầu đều được đáp ứng')}</div></div>` +
-      table(
-        ['Chỉ số', 'Bình thường', 'Có tình huống', 'Có phương án'],
-        rows.map(
-          ([name, key]) =>
-            `<tr><td>${esc(name)}</td><td>${c.baseline[key]}</td><td>${c.scenario[key]}</td><td>${c.coordinated[key]}</td></tr>`,
-        ),
+  const comparison = table(
+    [
+      'Chỉ số toàn mạng lưới',
+      'Bình thường',
+      'Có tình huống, giữ nguyên',
+      'Có tình huống, có kế hoạch',
+    ],
+    rows.map(
+      ([name, key]) =>
+        `<tr><td>${esc(name)}</td><td>${baseline[key]}</td><td>${before[key]}</td><td>${after[key]}</td></tr>`,
+    ),
+  );
+  const metrics = charging
+    ? stat(
+        'Chờ bắt đầu sạc cuối kỳ',
+        before.waitingCharges,
+        '',
+        `Bình thường: ${baseline.waitingCharges}. Gồm chờ cấp cổng và đã được giữ cổng.`,
       ) +
-      `<div class="panel-body"><h3>Khuyến nghị vận hành</h3><p class="metric-note">Xe điều phối chỉ sẵn sàng sau thời điểm đến. Không tự áp dụng vào hệ thống.</p>${
-        r.actions.length
-          ? table(
-              ['Phương án', 'Số xe', 'Thời điểm'],
-              r.actions.map(
-                (a) =>
-                  `<tr><td><strong>${a.type === 'RELOCATE' ? 'Điều chuyển' : 'Chuyển hướng'}: ${esc(hubName(a.fromHubId))} → ${esc(hubName(a.toHubId))}</strong><span class="sub">${esc(a.reason)}</span></td><td>${a.quantity}</td><td>Phút ${a.departMinute} → ${a.arrivalMinute}</td></tr>`,
-              ),
-            )
-          : ''
-      }${r.recommendations
-        .filter((t) => !t.startsWith('Chuyển ') && !t.startsWith('Hướng '))
-        .map((t) => `<p class="recommendation">${esc(t)}</p>`)
-        .join('')}<details class="model-details"><summary>Diễn biến và sức chứa</summary>${table(
-        ['Phút', 'Xe sẵn sàng', 'Lượt chưa phục vụ tích lũy', 'Chờ cấp cổng'],
-        r.timeline.map(
-          (f) =>
-            `<tr><td>${f.minute}</td><td>${f.availableVehicles}</td><td>${f.unservedTrips}</td><td>${f.waitingCharges}</td></tr>`,
-        ),
-      )}<h3 style="margin:18px 0 10px">Trạng thái Hub cuối kỳ, chưa áp dụng phương án</h3>${table(
-        ['Hub', 'Xe sẵn sàng', 'Đang đỗ + đã giữ / sức chứa', 'Cổng trống / lỗi'],
-        last.hubs.map(
-          (h) =>
-            `<tr><td>${esc(hubName(h.hubId))}</td><td>${h.availableVehicles}</td><td>${h.occupiedSpaces} + ${h.heldSpaces} / ${h.capacity}</td><td>${h.freePorts} / ${h.faultPorts}</td></tr>`,
-        ),
-      )}</details><details class="model-details"><summary>Giả định và giới hạn mô hình</summary><ul class="assumptions">${r.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details></div>`,
+      stat(
+        'Không đạt pin đúng hạn',
+        before.lateCharges,
+        '',
+        `Bình thường: ${baseline.lateCharges}. Chỉ xét yêu cầu có hạn cần xe trong kỳ.`,
+      ) +
+      stat(
+        'Chờ lâu nhất ghi nhận',
+        `${before.maxChargeWaitMinutes} phút`,
+        '',
+        `Bình thường: ${baseline.maxChargeWaitMinutes} phút. Thời gian chờ đã quan sát trong kỳ.`,
+      )
+    : stat(
+        'Chưa phục vụ nếu giữ nguyên',
+        `${before.unservedTrips} lượt`,
+        '',
+        `${shortage(before)} do thiếu xe · ${before.blockedReturns} do thiếu chỗ trả`,
+      ) +
+      stat(
+        'Chưa phục vụ với kế hoạch',
+        `${after.unservedTrips} lượt`,
+        '',
+        `${shortage(after)} do thiếu xe · ${after.blockedReturns} do thiếu chỗ trả`,
+      ) +
+      stat(
+        extra >= 0 ? 'Phục vụ thêm' : 'Phục vụ ít hơn',
+        `${Math.abs(extra)} lượt`,
+        '',
+        `Đáp ứng ${before.servedTrips} → ${after.servedTrips} trên ${before.requestedTrips} yêu cầu`,
+      );
+  let explanation = r.effects.map(esc).join(' ');
+  if (scope.scenarioType === 'DEMAND_SURGE')
+    explanation += ` Lượt đi ra từ ${esc(scope.targetHubName)} tăng từ ${scope.normalOutboundRequests} lên ${scope.scenarioOutboundRequests}.`;
+  if (scope.scenarioType === 'PORT_FAILURE')
+    explanation += ` Cổng sử dụng được tại Hub: ${scope.initialUsablePorts} → ${scope.scenarioUsablePorts} trên ${scope.totalPorts} cổng lắp đặt.`;
+  const steps = r.actions
+    .map(
+      (a, i) =>
+        `<li><div class="plan-step-title">Bước ${i + 1} · ${a.type === 'RELOCATE' ? `Điều chuyển ${a.quantity} xe` : `Đề nghị đổi Hub trả cho ${a.quantity} chuyến`}</div><p>${
+          a.type === 'RELOCATE'
+            ? `<strong>${esc(hubName(a.fromHubId))} → ${esc(hubName(a.toHubId))}</strong>. Xuất phát ở phút ${a.departMinute}, tới nơi ở phút ${a.arrivalMinute}; lúc đó xe mới phục vụ được tại Hub nhận.`
+            : `Chuyến đi từ <strong>${esc(hubName(a.fromHubId))}</strong>: Hub trả dự kiến <strong>${esc(hubName(a.originalDestinationHubId))}</strong> thiếu chỗ. Đề nghị trả tại <strong>${esc(hubName(a.toHubId))}</strong>, dự kiến tới ở phút ${a.arrivalMinute}. Chỉ thực hiện nếu khách đồng ý trước khi xuất phát.`
+        }</p><p class="metric-note">${esc(a.reason)}</p></li>`,
+    )
+    .join('');
+  const plan = charging
+    ? `<h3>Cách xử lý đề xuất</h3><ol class="plan-steps"><li><div class="plan-step-title">Giữ thứ tự ưu tiên rõ ràng</div><p>Cấp cổng trống theo hạn cần xe sớm, pin thấp, rồi thứ tự gửi yêu cầu. Mỗi cổng phục vụ một xe; xe chưa rút dây vẫn chiếm cổng.</p></li><li><div class="plan-step-title">${scope.scenarioType === 'PORT_FAILURE' ? 'Cử kỹ thuật viên kiểm tra cổng lỗi' : 'Theo dõi các yêu cầu có nguy cơ trễ'}</div><p>${scope.scenarioType === 'PORT_FAILURE' ? 'Cổng lỗi được loại khỏi phân bổ. Kết quả chưa giả định đã sửa xong, nên chưa tính lợi ích sửa chữa.' : 'Thông báo khách về hạn cần xe có thể không đáp ứng; thống nhất thời gian khác nếu cần. Đây là đề xuất xử lý, chưa tự thay đổi yêu cầu.'}</p></li></ol><div class="notice">Các số trên so sánh bình thường với khi có tình huống, cùng quy tắc ưu tiên sạc. Mô hình không giả định đã bổ sung cổng hoặc đã sửa chữa để tạo kết quả tốt hơn.</div>`
+    : `<h3>${r.actions.length ? `Kế hoạch gồm ${r.actions.length} bước` : 'Chưa tìm được bước điều phối khả thi'}</h3><p class="metric-note">Đây là các bước trong cùng một kế hoạch. “Phút” tính từ đầu khoảng mô phỏng; kết quả không tự tạo lệnh vận hành.</p>${steps ? `<ol class="plan-steps">${steps}</ol>` : '<p class="recommendation">Giới hạn xe nguồn, chỗ nhận hoặc thời gian chưa cho phép điều phối thêm.</p>'}<div class="notice ${extra <= 0 || after.blockedReturns > before.blockedReturns || after.lateCharges > before.lateCharges ? 'caution' : ''}">${extra > 0 ? `Kế hoạch phục vụ thêm ${extra} lượt.` : extra === 0 ? 'Kế hoạch chưa làm tăng số lượt phục vụ.' : `Kế hoạch phục vụ ít hơn ${-extra} lượt; cần xem lại trước khi áp dụng.`} Còn ${after.unservedTrips} lượt chưa phục vụ: ${shortage(after)} do thiếu xe sẵn sàng, ${after.blockedReturns} do thiếu chỗ trả.${after.blockedReturns > before.blockedReturns ? ` Số lượt bị từ chối do thiếu chỗ tăng từ ${before.blockedReturns} lên ${after.blockedReturns}; đây là đánh đổi cần cân nhắc.` : ''}${after.lateCharges > before.lateCharges ? ` Số yêu cầu sạc trễ cũng tăng từ ${before.lateCharges} lên ${after.lateCharges}.` : ''}</div>`;
+  return panel(
+    'Kết quả mô phỏng',
+    `${label(scope.scenarioType)} · ${scope.targetHubName} · ${scope.horizonMinutes} phút`,
+    `<div class="panel-body whatif-story"><div class="result-context"><h3>Điều gì thay đổi?</h3><p>${explanation}</p></div><p class="metric-note">${charging ? 'Các chỉ số sạc bên dưới tính trên toàn mạng lưới.' : `Trong ${scope.horizonMinutes} phút, toàn mạng lưới có ${before.requestedTrips} yêu cầu thuê khi xảy ra tình huống (bình thường: ${baseline.requestedTrips}). Đây là số lượt trong cả kỳ; một xe có thể phục vụ nhiều lượt.`} Tình huống chỉ được áp dụng tại Hub đã chọn.</p><div class="result-grid three">${metrics}</div>${plan}
+    <details class="model-details"><summary>Xem cách tính và bảng so sánh đầy đủ</summary><p class="metric-note">Ba lượt chạy độc lập dùng cùng lịch nhu cầu nền: bình thường, có tình huống, và có tình huống kèm kế hoạch điều phối. ${charging ? 'Kế hoạch điều phối xe không đồng nghĩa đã tăng năng lực sạc; chỉ số chính ở trên dùng lượt có tình huống, giữ nguyên.' : 'So sánh trước/sau kế hoạch trên cùng số yêu cầu.'}</p>${comparison}<p class="metric-note">Thuật toán theo bước ${r.metrics.stepMinutes} phút, sắp hàng ưu tiên sạc và điều phối tham lam có ràng buộc: giữ ít nhất 2 xe ở nguồn, tối đa 3 bước, tối đa 3 xe mỗi lệnh, giữ chỗ nhận và tính thời gian đến. Mỗi bước kiểm tra bảo toàn xe, chỗ đỗ và cổng. Không bảo đảm tối ưu toàn cục.</p>${charging && steps ? `<h3>Các bước điều phối xe trong lượt thử bổ sung</h3><ol class="plan-steps">${steps}</ol>` : ''}<ul class="assumptions">${r.recommendations
+      .filter((t) => !t.startsWith('Chuyển ') && !t.startsWith('Hướng '))
+      .map((t) => `<li>${esc(t)}</li>`)
+      .join('')}</ul></details>
+    <details class="model-details"><summary>Xem diễn biến theo thời gian</summary><p class="metric-note">Diễn biến khi có tình huống và chưa áp dụng kế hoạch.</p>${table(
+      ['Phút', 'Xe sẵn sàng', 'Lượt chưa phục vụ tích lũy', 'Chờ bắt đầu sạc'],
+      r.timeline.map(
+        (f) =>
+          `<tr><td>${f.minute}</td><td>${f.availableVehicles}</td><td>${f.unservedTrips}</td><td>${f.waitingCharges}</td></tr>`,
+      ),
+    )}<h3>Trạng thái Hub cuối kỳ</h3>${table(
+      ['Hub', 'Xe sẵn sàng', 'Đang đỗ + đã giữ / sức chứa', 'Cổng trống / lỗi'],
+      last.hubs.map(
+        (h) =>
+          `<tr><td>${esc(hubName(h.hubId))}</td><td>${h.availableVehicles}</td><td>${h.occupiedSpaces} + ${h.heldSpaces} / ${h.capacity}</td><td>${h.freePorts} / ${h.faultPorts}</td></tr>`,
+      ),
+    )}</details>
+    <details class="model-details"><summary>Giả định và giới hạn mô hình</summary><ul class="assumptions">${r.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul><p class="metric-note">Chụp trạng thái lúc ${date(r.generatedAt)} · ${r.metrics.totalVehicles} xe trong mô hình. Kết quả thay đổi khi trạng thái vận hành thay đổi.</p></details></div>`,
   );
 }
 
 function demoView() {
-  const resources = [
-    ...d().vehicles.map((v) => option('VEHICLE|' + v.id, vehicleName(v.id))),
-    ...d().ports.map((p) => option('CHARGING_PORT|' + p.id, p.id)),
-  ].join('');
   return (
     heading(
       'Công cụ trình diễn',
-      'Điều chỉnh điều kiện mô phỏng để minh họa các luồng nghiệp vụ.',
+      'Tiến thời gian để quan sát nghiệp vụ hoặc khôi phục dữ liệu cho lượt demo mới.',
     ) +
-    `<div class="split equal">${panel('Thời gian mô phỏng', 'Theo dõi hết hạn đặt chỗ và tiến trình sạc', `<div class="panel-body"><div class="notice">Thời gian hệ thống: <strong>${new Date(d().serverNow).toLocaleString('vi-VN')}</strong></div><p class="metric-note">Tiến thời gian sẽ kích hoạt hết hạn giữ chỗ, cập nhật pin và phân bổ yêu cầu sạc đang chờ.</p><div class="actions">${button('+1 phút', 'time-advance', '60', 'secondary', 'clock')}${button('+15 phút', 'time-advance', '900', 'secondary')}${button('+1 giờ', 'time-advance', '3600', 'secondary')}</div></div>`)}${panel('Phản hồi thiết bị giả lập', 'Thiết lập kết quả khóa, mở khóa hoặc kiểm tra', `<form id="command-form" class="panel-body">${field('target', 'Tài nguyên', select('target', resources))}<div class="form-grid">${field('command', 'Lệnh', select('command', ['UNLOCK', 'LOCK', 'CHECK'].map((v) => option(v, { UNLOCK: 'Mở khóa', LOCK: 'Khóa', CHECK: 'Kiểm tra' }[v])).join('')))}${field('success', 'Phản hồi', select('success', option('true', 'Thành công') + option('false', 'Thất bại')))}</div><button class="btn primary" type="submit">Lưu phản hồi</button></form>`)}</div>${panel('Bắt đầu lại buổi demo', 'Khôi phục dữ liệu mẫu ban đầu', `<div class="panel-body"><p class="muted small" style="margin-bottom:17px">Toàn bộ thay đổi và phiên đăng nhập sẽ được đặt lại. Các tài khoản mẫu vẫn dùng mật khẩu Demo@12345.</p>${button('Đặt lại dữ liệu demo', 'reset-demo', '', 'danger', 'refresh')}</div>`)}`
+    panel(
+      'Thời gian mô phỏng',
+      'Dùng khi cần quan sát thay đổi mà không phải chờ thời gian thật',
+      `<div class="panel-body"><div class="notice">Thời gian hệ thống: <strong>${new Date(d().serverNow).toLocaleString('vi-VN')}</strong></div><p class="metric-note">+1 phút để xem pin tăng; +15 phút để minh họa hết hạn giữ chỗ; +1 giờ để quan sát một khoảng sạc dài hơn. Thao tác tác động tới toàn bộ buổi demo. Xe đạt mục tiêu vẫn cần chủ xe hoặc kỹ thuật viên xác nhận ngắt kết nối.</p><div class="actions">${button('+1 phút', 'time-advance', '60', 'secondary')}${button('+15 phút', 'time-advance', '900', 'secondary')}${button('+1 giờ', 'time-advance', '3600', 'secondary')}</div></div>`,
+    ) +
+    panel(
+      'Bắt đầu lại buổi demo',
+      'Khôi phục xe, cổng, hàng chờ và các dữ liệu mẫu ban đầu',
+      `<div class="panel-body"><p class="metric-note">Thao tác xóa thay đổi của buổi demo và đăng xuất mọi tài khoản. Mật khẩu tài khoản mẫu: Demo@12345.</p>${button('Đặt lại dữ liệu demo', 'reset-demo', '', 'danger')}</div>`,
+    )
   );
 }
+
 function profileView() {
   const u = d().user;
   return (
@@ -640,6 +728,7 @@ function profileView() {
 }
 function render() {
   if (!d()) return;
+  const chargingLogOpen = document.querySelector('.charging-log')?.open;
   shell();
   const views = {
     overview,
@@ -659,6 +748,8 @@ function render() {
   document.querySelector('#main').innerHTML =
     views[page()]() +
     `<footer class="footer"><span><b>Smart E-Mobility Hub</b> · Khu đô thị ĐHQG-HCM</span><span>Scout Regiment · CO3001</span></footer>`;
+  if (chargingLogOpen && document.querySelector('.charging-log'))
+    document.querySelector('.charging-log').open = true;
   bindForms();
   updateTimers();
 }
@@ -790,7 +881,7 @@ function chargeForm() {
         input('requiredBy', 'datetime-local'),
         'Dùng để xếp ưu tiên; không bảo đảm sạc xong đúng thời điểm này.',
       ) +
-      '<p class="small muted">Cổng được phân bổ tự động theo hàng đợi và công suất. Bạn sẽ nhận thông báo khi đến lượt.</p>',
+      '<p class="small muted">Cổng trống phù hợp được cấp theo thứ tự ưu tiên tại Hub. Bạn sẽ nhận thông báo khi đến lượt.</p>',
     async (data) => {
       const v = vehicles.find((v) => v.id === data.vehicleId);
       await api('/charging/requests', {
@@ -1066,20 +1157,6 @@ function bindForms() {
       n.hidden = false;
     } finally {
       submit.disabled = false;
-    }
-  });
-  document.querySelector('#command-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    const [kind, id] = f.target.split('|');
-    try {
-      await api('/demo/command', {
-        method: 'POST',
-        body: { target: { kind, id }, command: f.command, success: f.success === 'true' },
-      });
-      toast('Đã lưu phản hồi giả lập.');
-    } catch (err) {
-      toast(err.message, true);
     }
   });
 }

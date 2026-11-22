@@ -59,13 +59,16 @@ Xác nhận đỗ tạo ParkingVisit, chỗ OCCUPIED và bản đặt COMPLETED.
 | Method | Path                              | Body / quyền                                                                                     |
 | ------ | --------------------------------- | ------------------------------------------------------------------------------------------------ |
 | POST   | `/charging/requests`              | Chủ xe cá nhân hoặc Operator cho xe chung: `{vehicleId,hubId,targetBattery,requiredBy?,portId?}` |
-| POST   | `/charging/:reservationId/start`  | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
-| POST   | `/charging/:sessionId/stop`       | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
-| POST   | `/charging/:sessionId/disconnect` | Chủ yêu cầu hoặc Operator: `{}`                                                                  |
+| POST   | `/charging/:reservationId/start`  | Customer sở hữu xe cá nhân hoặc Technician cho xe dùng chung: `{}`                               |
+| POST   | `/charging/:sessionId/stop`       | Customer sở hữu xe cá nhân hoặc Technician cho xe dùng chung: `{}`                               |
+| POST   | `/charging/:sessionId/disconnect` | Customer sở hữu xe cá nhân hoặc Technician cho xe dùng chung: `{}`                               |
 
 `portId` nếu có là cổng ưu tiên, không phải cấp cổng trực tiếp. Mọi yêu cầu đều WAITING. Giao diện mặc định tự động phân bổ để không vượt hàng đợi.
 
-- WAITING → HELD: theo thời điểm cần xe sớm → pin thấp → tạo trước → ID; có xét công suất cả cổng đang giữ và phiên cấp điện.
+- WAITING → HELD: theo thời điểm cần xe sớm → pin thấp → tạo trước → ID; chỉ cấp cổng trống, không lỗi và đúng cổng ưu tiên nếu có. Cổng đang giữ, đang sạc hoặc còn kết nối chưa thể cấp lại. Không có giới hạn công suất riêng thấp hơn tổng định mức các cổng.
+- Operator chỉ đăng ký yêu cầu sạc xe dùng chung, hủy yêu cầu của mình và giám sát toàn mạng lưới; không bắt đầu/dừng/ngắt phiên. Technician thao tác các phiên xe dùng chung, không thao tác xe cá nhân của khách.
+- `/workspace`: Operator thấy toàn bộ nhật ký; Technician thấy yêu cầu/phiên sạc xe dùng chung; Customer chỉ thấy của mình. Mỗi yêu cầu có `requesterName` và `queuePosition` nếu đang WAITING; vị trí tính trên toàn bộ hàng chờ tại Hub, kể cả khi người xem chỉ thấy xe của mình.
+- Hub trả `chargingTotalKw` là tổng định mức lắp đặt, gồm cổng lỗi; `chargingActiveKw` là tổng định mức các cổng thực sự đang cấp điện trong mô hình; `chargingAvailableKw` là tổng định mức cổng trống có thể cấp tại Hub hoạt động. `chargingBudgetKw` giữ tương thích API và luôn được tính lại bằng `chargingTotalKw`, không dùng làm hạn mức độc lập; `chargingUsedKw` gồm cổng đang giữ và phiên đang hoạt động. Có thêm tổng cổng và số cổng từng trạng thái.
 - Không có requiredBy: xếp sau yêu cầu có hạn. requiredBy là độ ưu tiên, không phải bảo đảm hoàn thành đúng hạn.
 - HELD có 15 phút để bắt đầu; WAITING có 60 phút hiệu lực. Gia hạn đỗ/sạc tối đa 2 lần, 1–15 phút/lần.
 - Bắt đầu: bản đặt CONFIRMED, phiên ACTIVE, xe/cổng CHARGING.
@@ -114,12 +117,12 @@ Sửa lệnh giữ tài nguyên nguyên tử; thất bại giữ nguyên lệnh 
 | PORT_FAILURE      | `failedPorts`: số nguyên 0–20          |
 | VEHICLE_IMBALANCE | `additionalVehicles`: số nguyên 0–20   |
 
-Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả metrics, comparison, actions, timeline, effects, assumptions và recommendations. Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
+Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả metrics, comparison, actions, timeline, effects, assumptions, recommendations và `scope` (loại tình huống, Hub, thời gian, nhu cầu đi ra từ Hub, xe/cổng dùng được trước và sau tác động). Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
 
 ## Điều khiển demo
 
 - `POST /demo/telemetry`: `{vehicleId,hubId,batteryLevel?}`; Operator, chủ xe cá nhân, chủ Rental đang chạy hoặc Technician đang vận chuyển xe đó. Chỉ cập nhật quan sát, không ghi đè nghiệp vụ.
-- `POST /demo/command`: Operator, `{target:{kind,id},command,success}`; UNLOCK/LOCK/CHECK.
+- `POST /demo/command`: điểm kiểm thử backend, Operator, `{target:{kind,id},command,success}`; UNLOCK/LOCK/CHECK. Không có biểu mẫu điều khiển này trên giao diện demo.
 - `POST /demo/advance`: Operator, `{seconds}` 1–3600; tiến thời gian toàn buổi demo và chạy Jobs.
 - `POST /demo/reset`: Operator; tạo lại System và thu hồi mọi session.
 

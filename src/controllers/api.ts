@@ -6,6 +6,7 @@ import { config } from '../shared/config.js';
 import { ensure, must, numeric, text } from '../shared/errors.js';
 import { actor, freeVehicle } from '../shared/business.js';
 import { publicUser } from '../shared/security.js';
+import { chargingPriority } from '../shared/scheduling.js';
 import {
   Role,
   DeviceCommand,
@@ -13,8 +14,11 @@ import {
   RentalStatus,
   DispatchStatus,
   HubStatus,
+  ReservationKind,
+  ReservationStatus,
 } from '../models/enums.js';
 import type { HubSearchDTO, IncidentFilterDTO, DispatchFilterDTO } from '../models/types.js';
+import type { ChargingReservation } from '../models/entities.js';
 function query(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.query)) {
@@ -94,8 +98,26 @@ export function apiController(context: AppContext): Router {
     x.jobs.tick(x.now());
     const s = x.repo.snapshot().state;
     const u = res.locals.user;
+    const positions = new Map<string, number>();
+    const ranks = new Map<string, number>();
+    [...s.reservations.values()]
+      .filter(
+        (r): r is ChargingReservation =>
+          r.kind === ReservationKind.CHARGING && r.status === ReservationStatus.WAITING,
+      )
+      .sort((a, b) => chargingPriority(a, b, s.vehicles))
+      .forEach((r) => {
+        const rank = (ranks.get(r.hubId) ?? 0) + 1;
+        ranks.set(r.hubId, rank);
+        positions.set(r.id, rank);
+      });
     const reservations = [...s.reservations.values()].filter(
-      (r) => u.role === Role.OPERATOR || r.userId === u.id,
+      (r) =>
+        u.role === Role.OPERATOR ||
+        r.userId === u.id ||
+        (u.role === Role.TECHNICIAN &&
+          r.kind === ReservationKind.CHARGING &&
+          s.vehicles.get(r.vehicleId)?.ownership === VehicleOwnership.SHARED),
     );
     const reservationIds = new Set(reservations.map((r) => r.id));
     res.json({
@@ -114,7 +136,11 @@ export function apiController(context: AppContext): Router {
         })),
       spaces: [...s.spaces.values()],
       ports: [...s.ports.values()],
-      reservations,
+      reservations: reservations.map((r) => ({
+        ...r,
+        requesterName: s.users.get(r.userId)?.fullName || r.userId,
+        queuePosition: positions.get(r.id),
+      })),
       rentals: [...s.rentals.values()].filter((r) => u.role === Role.OPERATOR || r.userId === u.id),
       chargingSessions: [...s.chargingSessions.values()].filter(
         (c) => u.role === Role.OPERATOR || reservationIds.has(c.reservationId),

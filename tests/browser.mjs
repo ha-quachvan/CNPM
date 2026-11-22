@@ -178,15 +178,65 @@ try {
   await customer.getByText('Đã đánh dấu thông báo đã đọc.', { exact: true }).waitFor();
   assert.ok((await ws(customer)).notifications.every((n) => n.readAt));
   await navigate(operator, 'charging');
-  await operator.locator('[data-action=charge-stop][data-id=session-seed-active]').click();
-  await clickDialog(operator, 'Dừng sạc');
-  await operator.locator('[data-action=charge-disconnect][data-id=session-seed-active]').click();
-  await clickDialog(operator, 'Xác nhận ngắt kết nối');
+  assert.equal(
+    await operator
+      .locator(
+        '[data-action=charge-start], [data-action=charge-stop], [data-action=charge-disconnect]',
+      )
+      .count(),
+    0,
+  );
+  assert.equal(await operator.locator('.charging-log').getAttribute('open'), null);
+  await operator.getByText('Nhật ký phiên sạc toàn hệ thống', { exact: false }).waitFor();
+  await operator.locator('.charging-log summary').click();
+  await operator.getByRole('button', { name: 'Làm mới', exact: true }).click();
+  await operator.getByText('Dữ liệu đã được cập nhật.', { exact: true }).waitFor();
+  assert.equal(await operator.locator('.charging-log').evaluate((n) => n.open), true);
+  await operator.locator('.charging-log summary').click();
+  const technician = await account('technician');
+  await navigate(technician, 'charging');
+  assert.equal(await technician.locator('[data-id=session-seed-active]').count(), 0);
+  assert.equal(await technician.locator('[data-action=charge-new]').count(), 0);
+  await technician.locator('[data-action=charge-stop][data-id=session-seed-fleet-1]').click();
+  await clickDialog(technician, 'Dừng sạc');
+  assert.equal((await ws(technician)).ports.find((p) => p.id === 'hub-a-c2').status, 'CONNECTED');
+  assert.equal(
+    (await ws(operator)).reservations.find((r) => r.id === 'charge-seed-wait-2').status,
+    'WAITING',
+  );
+  await technician.locator('[data-action=charge-disconnect][data-id=session-seed-fleet-1]').click();
+  await clickDialog(technician, 'Xác nhận ngắt kết nối');
   assert.equal(
     (await ws(operator)).reservations.find((r) => r.id === 'charge-seed-wait-2').status,
     'HELD',
   );
+  await navigate(operator, 'charging');
+  await operator.locator('[data-action=charge-new]').click();
+  await dialog(operator).locator('[name=vehicleId]').selectOption('hub-metro-v2');
+  await dialog(operator).locator('[name=targetBattery]').fill('90');
+  await clickDialog(operator, 'Gửi yêu cầu');
+  const fleetRequest = (await ws(operator)).reservations.find(
+    (r) => r.vehicleId === 'hub-metro-v2' && r.kind === 'CHARGING' && r.status === 'HELD',
+  );
+  assert.ok(fleetRequest);
+  assert.equal(await operator.locator('[data-action=charge-start]').count(), 0);
   await operator.screenshot({ path: 'artifacts/charging-operator.png', fullPage: true });
+  await navigate(technician, 'charging');
+  await technician.locator(`[data-action=charge-start][data-id="${fleetRequest.id}"]`).click();
+  await clickDialog(technician, 'Bắt đầu sạc');
+  const fleetSession = (await ws(technician)).chargingSessions.find(
+    (c) => c.reservationId === fleetRequest.id,
+  );
+  assert.equal(fleetSession.status, 'ACTIVE');
+  await technician.locator(`[data-action=charge-stop][data-id="${fleetSession.id}"]`).click();
+  await clickDialog(technician, 'Dừng sạc');
+  await technician.locator(`[data-action=charge-disconnect][data-id="${fleetSession.id}"]`).click();
+  await clickDialog(technician, 'Xác nhận ngắt kết nối');
+  await technician.screenshot({ path: 'artifacts/charging-technician.png', fullPage: true });
+  await navigate(operator, 'demo');
+  assert.equal(await operator.locator('#command-form').count(), 0);
+  assert.equal(await operator.getByText('Phản hồi thiết bị giả lập', { exact: true }).count(), 0);
+  await operator.screenshot({ path: 'artifacts/demo-tools.png', fullPage: true });
   await navigate(customer, 'incidents');
   await customer.getByRole('button', { name: 'Báo cáo sự cố', exact: true }).click();
   await dialog(customer).locator('[name=targetId]').selectOption('hub-a-v3');
@@ -208,7 +258,12 @@ try {
   assert.ok(order);
   await navigate(operator, 'what-if');
   await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
-  await operator.getByRole('heading', { name: 'Khuyến nghị vận hành', exact: true }).waitFor();
+  await operator.getByRole('heading', { name: 'Kết quả mô phỏng', exact: true }).waitFor();
+  assert.equal(await operator.locator('.whatif-story details[open]').count(), 0);
+  await operator.getByText('Chưa phục vụ nếu giữ nguyên', { exact: true }).waitFor();
+  await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).waitFor();
+  assert.equal(await operator.getByText('Phương án được thử', { exact: true }).count(), 0);
+  await operator.screenshot({ path: 'artifacts/whatif-travel.png', fullPage: true });
   for (const type of ['HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE']) {
     await operator.locator('#scenario-type').selectOption(type);
     const response = operator.waitForResponse(
@@ -219,10 +274,21 @@ try {
     await operator.getByText('Mô phỏng hoàn tất.', { exact: true }).last().waitFor();
     assert.equal(await operator.locator('#scenario-type').inputValue(), type);
     assert.equal(await operator.locator('#whatif-error').isVisible(), false);
+    assert.equal(await operator.locator('.whatif-story details[open]').count(), 0);
+    if (['CHARGING_SURGE', 'PORT_FAILURE'].includes(type)) {
+      await operator.getByText('Không đạt pin đúng hạn', { exact: true }).waitFor();
+      assert.equal(
+        await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).count(),
+        0,
+      );
+      await operator.screenshot({
+        path: `artifacts/whatif-${type.toLowerCase()}.png`,
+        fullPage: true,
+      });
+    }
   }
   await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
   await operator.screenshot({ path: 'artifacts/whatif-desktop.png', fullPage: true });
-  const technician = await account('technician');
   await navigate(technician, 'incidents');
   await technician.locator(`[data-action=incident-accept][data-id="${incident.id}"]`).click();
   await clickDialog(technician, 'Nhận xử lý');
@@ -272,7 +338,7 @@ try {
     [
       'technician',
       technician,
-      ['overview', 'hubs', 'dispatch', 'incidents', 'notifications', 'profile'],
+      ['overview', 'hubs', 'dispatch', 'charging', 'incidents', 'notifications', 'profile'],
     ],
   ]) {
     for (const width of [1440, 768, 390]) {
@@ -307,7 +373,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: three-role browser workflows, 72 page/viewport checks, no uncaught JS errors.',
+    'PASS: three-role browser workflows, 75 page/viewport checks, no uncaught JS errors.',
   );
 } finally {
   await Promise.all(contexts.map((c) => c.close()));

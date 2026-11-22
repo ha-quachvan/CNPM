@@ -111,6 +111,8 @@ test('JSON serialization preserves what-if metrics; bad inputs and cross-origin 
     );
     assert.equal(result.status, 200);
     assert.ok(Object.keys(result.body.metrics).length >= 6);
+    assert.equal(result.body.scope.targetHubId, 'hub-a');
+    assert.equal(result.body.scope.scenarioType, 'DEMAND_SURGE');
     assert.equal((await request('/demo/advance', 'POST', { seconds: -1 }, token)).status, 400);
     assert.equal(
       (await request('/demo/reset', 'POST', {}, token, { Origin: 'https://untrusted.example' }))
@@ -281,4 +283,85 @@ test('HTTP destination booking, personal exit and charging transitions enforce o
     const final = (await request('/workspace', 'GET', undefined, customer)).body;
     assert.equal(final.vehicles.find((v: any) => v.id === 'personal-1').parkingSpaceId, undefined);
     assert.ok(final.parkingVisits.some((v: any) => v.vehicleId === 'personal-1' && v.exitedAt));
+  }));
+
+test('HTTP charging monitoring, global queue ranks and fleet technician permissions are consistent', async () =>
+  withApi(async (request: any) => {
+    const login = async (name: string) =>
+      (
+        await request('/auth/login', 'POST', {
+          identifier: name + '@hub.local',
+          password: 'Demo@12345',
+        })
+      ).body.token;
+    const op = await login('operator');
+    const tech = await login('technician');
+    const customer = await login('customer4');
+    const ws = (await request('/workspace', 'GET', undefined, op)).body;
+    const a = ws.hubs.find((h: any) => h.id === 'hub-a');
+    assert.equal(a.chargingTotalKw, 12.1);
+    assert.equal(a.chargingActiveKw, 8.8);
+    assert.equal(a.freePorts, 0);
+    assert.equal(a.activePorts, 3);
+    const mine = (await request('/workspace', 'GET', undefined, customer)).body;
+    assert.equal(
+      mine.reservations.find((r: any) => r.id === 'charge-seed-wait-1').queuePosition,
+      2,
+    );
+    assert.ok(mine.reservations.every((r: any) => r.userId === 'customer4'));
+    const fleet = (await request('/workspace', 'GET', undefined, tech)).body;
+    assert.equal(fleet.chargingSessions.length, 2);
+    assert.ok(fleet.chargingSessions.every((c: any) => c.vehicleId.startsWith('hub-')));
+    assert.ok(!fleet.reservations.some((r: any) => r.id === 'charge-seed-active'));
+    assert.ok(ws.reservations.find((r: any) => r.id === 'charge-seed-active').requesterName);
+    for (const token of [op, tech, customer])
+      assert.equal(
+        (await request('/charging/session-seed-active/stop', 'POST', {}, token)).status,
+        403,
+      );
+    assert.equal(
+      (await request('/charging/session-seed-fleet-1/stop', 'POST', {}, op)).status,
+      403,
+    );
+    assert.equal(
+      (await request('/charging/session-seed-fleet-1/stop', 'POST', {}, tech)).status,
+      200,
+    );
+    assert.equal(
+      (await request('/charging/session-seed-fleet-1/disconnect', 'POST', {}, op)).status,
+      403,
+    );
+    assert.equal(
+      (await request('/charging/session-seed-fleet-1/disconnect', 'POST', {}, tech)).status,
+      200,
+    );
+    const updated = (await request('/workspace', 'GET', undefined, op)).body;
+    assert.equal(
+      updated.reservations.find((r: any) => r.id === 'charge-seed-wait-2').status,
+      'HELD',
+    );
+    assert.equal(
+      updated.reservations.find((r: any) => r.id === 'charge-seed-wait-1').status,
+      'WAITING',
+    );
+    const newFleet = await request(
+      '/charging/requests',
+      'POST',
+      { vehicleId: 'hub-metro-v1', hubId: 'hub-metro', targetBattery: 80 },
+      op,
+    );
+    assert.equal(newFleet.status, 201);
+    await request('/workspace', 'GET', undefined, op);
+    assert.equal(
+      (await request(`/charging/${newFleet.body.id}/start`, 'POST', {}, op)).status,
+      403,
+    );
+    assert.equal(
+      (await request(`/charging/${newFleet.body.id}/start`, 'POST', {}, customer)).status,
+      403,
+    );
+    assert.equal(
+      (await request(`/charging/${newFleet.body.id}/start`, 'POST', {}, tech)).status,
+      201,
+    );
   }));

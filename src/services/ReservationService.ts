@@ -21,7 +21,6 @@ import {
   freeVehicle,
   held,
   releaseReservation,
-  powerUsed,
   fault,
   restoreVehicle,
   freeSpace,
@@ -186,14 +185,10 @@ export class ReservationService {
       } else {
         if (r.portId === newResourceId) return r;
         const p = must(s.ports, newResourceId, 'Cổng sạc');
-        const oldPower = r.portId ? must(s.ports, r.portId).powerKw : 0;
         ensure(
-          p.hubId === r.hubId &&
-            p.status === PortStatus.FREE &&
-            !fault(s, 'CHARGING_PORT', p.id) &&
-            powerUsed(s, r.hubId) - oldPower + p.powerKw <= must(s.hubs, r.hubId).chargingBudgetKw,
+          p.hubId === r.hubId && p.status === PortStatus.FREE && !fault(s, 'CHARGING_PORT', p.id),
           'ResourceConflict',
-          'Cổng mới không khả dụng hoặc vượt công suất Hub.',
+          'Cổng mới không khả dụng tại Hub này.',
         );
         r.status = ReservationStatus.CANCELLED;
         releaseReservation(s, r);

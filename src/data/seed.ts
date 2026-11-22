@@ -64,7 +64,6 @@ export const hubDefinitions = [
     capacity: 20,
     vehicles: 4,
     ports: 4,
-    budget: 8.8,
     code: 4,
     lat: 10.879,
     lng: 106.803,
@@ -75,7 +74,6 @@ export const hubDefinitions = [
     capacity: 20,
     vehicles: 14,
     ports: 4,
-    budget: 3.3,
     code: 1,
     lat: 10.882,
     lng: 106.806,
@@ -86,7 +84,6 @@ export const hubDefinitions = [
     capacity: 20,
     vehicles: 8,
     ports: 3,
-    budget: 5.5,
     code: 2,
     lat: 10.886,
     lng: 106.799,
@@ -97,7 +94,6 @@ export const hubDefinitions = [
     capacity: 16,
     vehicles: 9,
     ports: 3,
-    budget: 5.5,
     code: 3,
     lat: 10.881,
     lng: 106.808,
@@ -108,7 +104,6 @@ export const hubDefinitions = [
     capacity: 16,
     vehicles: 7,
     ports: 2,
-    budget: 5.5,
     code: 5,
     lat: 10.884,
     lng: 106.804,
@@ -119,7 +114,6 @@ export const hubDefinitions = [
     capacity: 8,
     vehicles: 0,
     ports: 2,
-    budget: 3.3,
     code: 6,
     lat: 10.887,
     lng: 106.807,
@@ -157,7 +151,7 @@ export function createSeed(now = Date.now()): NetworkState {
         position: { lat: h.lat, lng: h.lng, hubId: h.id },
         openingHours: '06:00 – 22:00',
         status: active ? HubStatus.ACTIVE : HubStatus.MAINTENANCE,
-        chargingBudgetKw: h.budget,
+        chargingBudgetKw: 0, // Derived below from the installed ports.
       }),
     );
     for (let i = 1; i <= h.capacity; i++) {
@@ -183,6 +177,12 @@ export function createSeed(now = Date.now()): NetworkState {
         }),
       );
     }
+    s.hubs.get(h.id)!.chargingBudgetKw =
+      Math.round(
+        [...s.ports.values()]
+          .filter((p) => p.hubId === h.id)
+          .reduce((sum, p) => sum + p.powerKw, 0) * 100,
+      ) / 100;
     for (let i = 1; i <= h.vehicles; i++) {
       const id = `${h.id}-v${i}`;
       const spaceId = `${h.id}-p${i}`;
@@ -254,8 +254,8 @@ export function createSeed(now = Date.now()): NetworkState {
   addPersonal('personal-10', 'customer', '59-U1 567.89', 'hub-library', 78);
   addPersonal('personal-11', 'customer2', '59-U2 345.67', 'hub-library', 45, true);
   addPersonal('personal-12', 'customer7', '59-U3 789.12', undefined, 52);
-  // One busy port consumes the full 3.3 kW Hub budget: two requests really wait,
-  // even though other connectors exist. It will not finish before the 8-minute demo.
+  // All three usable connectors at Hub A are busy; c4 is faulty.
+  // Two genuine waiting requests demonstrate priority after a connector is unplugged.
   const active = new ChargingReservation({
     id: 'charge-seed-active',
     kind: ReservationKind.CHARGING,
@@ -285,6 +285,40 @@ export function createSeed(now = Date.now()): NetworkState {
   );
   s.vehicles.get(active.vehicleId)!.status = VehicleStatus.CHARGING;
   s.ports.get(active.portId!)!.status = PortStatus.CHARGING;
+  for (const [i, vehicleId] of [
+    [1, 'hub-a-v5'],
+    [2, 'hub-a-v11'],
+  ] as const) {
+    const r = new ChargingReservation({
+      id: `charge-seed-fleet-${i}`,
+      kind: ReservationKind.CHARGING,
+      userId: 'operator',
+      hubId: 'hub-a',
+      vehicleId,
+      portId: `hub-a-c${i + 1}`,
+      targetBattery: 85,
+      createdAt: now - 3 * minute,
+      expiresAt: now + 15 * minute,
+      status: ReservationStatus.CONFIRMED,
+      extensionCount: 0,
+    });
+    s.reservations.set(r.id, r);
+    s.chargingSessions.set(
+      `session-seed-fleet-${i}`,
+      new ChargingSession({
+        id: `session-seed-fleet-${i}`,
+        reservationId: r.id,
+        vehicleId,
+        portId: r.portId!,
+        startedAt: now,
+        updatedAt: now,
+        targetBattery: r.targetBattery,
+        status: ChargingSessionStatus.ACTIVE,
+      }),
+    );
+    s.vehicles.get(vehicleId)!.status = VehicleStatus.CHARGING;
+    s.ports.get(r.portId!)!.status = PortStatus.CHARGING;
+  }
   for (const [i, vehicleId, userId, requiredMinutes] of [
     [1, 'personal-6', 'customer4', 35],
     [2, 'personal-7', 'customer5', 20],
@@ -297,11 +331,11 @@ export function createSeed(now = Date.now()): NetworkState {
       vehicleId,
       targetBattery: 80,
       requiredBy: now + requiredMinutes * minute,
-      createdAt: now - i * minute,
+      createdAt: now - (3 - i) * minute,
       expiresAt: now + 60 * minute,
       extensionCount: 0,
       status: ReservationStatus.WAITING,
-      waitingReason: 'Chưa đủ ngân sách công suất tại Hub.',
+      waitingReason: 'Ba cổng đang sạc, một cổng lỗi; chờ cổng trống phù hợp.',
     });
     s.reservations.set(r.id, r);
   }

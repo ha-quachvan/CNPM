@@ -7,6 +7,7 @@ import {
   PortStatus,
   HubStatus,
   Role,
+  VehicleOwnership,
 } from '../models/enums.js';
 import type { ChargeRequestDTO, NetworkState } from '../models/types.js';
 import { InMemoryRepository } from '../repositories/InMemoryRepository.js';
@@ -15,7 +16,6 @@ import {
   canCharge,
   activeHub,
   held,
-  powerUsed,
   fault,
   restorePort,
   restoreVehicle,
@@ -125,6 +125,12 @@ export class ChargingService {
     });
   }
   stop(userId: string, sessionId: string): ChargingSession {
+    const snapshot = this.repo.snapshot().state;
+    this.authorize(
+      snapshot,
+      userId,
+      must(snapshot.chargingSessions, sessionId, 'Phiên sạc').reservationId,
+    );
     this.advance(this.now());
     return this.repo.transact((s) => {
       const c = must(s.chargingSessions, sessionId, 'Phiên sạc');
@@ -214,11 +220,10 @@ export class ChargingService {
             !fault(s, 'CHARGING_PORT', p.id) &&
             (!r.preferredPortId || p.id === r.preferredPortId),
         );
-        const p = free.find((p) => powerUsed(s, h.id) + p.powerKw <= h.chargingBudgetKw);
+        const p = free[0];
         if (!p) {
-          r.waitingReason = free.length
-            ? 'Chưa đủ ngân sách công suất; hệ thống sẽ cấp khi có nguồn lực.'
-            : 'Chưa có cổng phù hợp; yêu cầu đang được xếp theo ưu tiên.';
+          r.waitingReason =
+            'Chưa có cổng trống phù hợp. Cổng đang giữ, đang sạc, chưa rút dây hoặc bị lỗi đều chưa thể cấp.';
           continue;
         }
         r.portId = p.id;
@@ -284,7 +289,7 @@ export class ChargingService {
     });
   }
   private authorize(s: NetworkState, userId: string, reservationId: string): ChargingReservation {
-    const u = actor(s, userId, [Role.CUSTOMER, Role.OPERATOR]);
+    const u = actor(s, userId, [Role.CUSTOMER, Role.TECHNICIAN]);
     const r = must(s.reservations, reservationId, 'Yêu cầu sạc');
     ensure(
       r.kind === ReservationKind.CHARGING,
@@ -292,9 +297,13 @@ export class ChargingService {
       'Bản đặt không phải yêu cầu sạc.',
     );
     ensure(
-      r.userId === userId || u.role === Role.OPERATOR,
+      s.vehicles.get(r.vehicleId)?.ownership === VehicleOwnership.SHARED
+        ? u.role === Role.TECHNICIAN
+        : u.role === Role.CUSTOMER &&
+            r.userId === userId &&
+            s.vehicles.get(r.vehicleId)?.ownerId === userId,
       'Forbidden',
-      'Bạn không có quyền quản lý phiên sạc này.',
+      'Khách hàng thao tác phiên sạc xe cá nhân của mình; kỹ thuật viên thao tác sạc xe dùng chung.',
       403,
     );
     return r;

@@ -88,6 +88,13 @@ export interface HubSummaryDTO {
   openingHours: string;
   status: string;
   chargingBudgetKw: number;
+  chargingTotalKw: number;
+  chargingActiveKw: number;
+  totalPorts: number;
+  activePorts: number;
+  heldPorts: number;
+  connectedPorts: number;
+  faultPorts: number;
   availableVehicles: number;
   freeSpaces: number;
   freePorts: number;
@@ -187,6 +194,19 @@ export interface SimulationComparison {
   scenario: SimulationMetrics;
   coordinated: SimulationMetrics;
   improved: boolean;
+}
+export interface SimulationScope {
+  scenarioType: ScenarioType;
+  targetHubId: ID;
+  targetHubName: string;
+  horizonMinutes: number;
+  normalOutboundRequests: number;
+  scenarioOutboundRequests: number;
+  initialAvailableVehicles: number;
+  scenarioAvailableVehicles: number;
+  initialUsablePorts: number;
+  scenarioUsablePorts: number;
+  totalPorts: number;
 }
 export interface ChargeRequestDTO {
   vehicleId: ID;

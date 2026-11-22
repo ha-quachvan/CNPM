@@ -223,6 +223,7 @@ export class SimulationResult {
   metrics!: Map<string, number>;
   recommendations!: string[];
   comparison?: import('./types.js').SimulationComparison;
+  scope?: import('./types.js').SimulationScope;
   actions?: import('./types.js').SimulationAction[];
   timeline?: import('./types.js').SimulationFrame[];
   assumptions?: string[];

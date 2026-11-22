@@ -40,6 +40,7 @@ import {
   restorePort,
   connected,
   powerUsed,
+  totalChargingPower,
   fault,
   releaseReturnHold,
 } from '../shared/business.js';
@@ -179,6 +180,32 @@ export class WhatIfEngine {
         coordinated: coordinated.metrics,
         improved,
       },
+      scope: {
+        scenarioType: scenario.type,
+        targetHubId: scenario.targetHubId,
+        targetHubName: must(original.hubs, scenario.targetHubId).name,
+        horizonMinutes: scenario.horizonMinutes,
+        normalOutboundRequests: events.filter((e) => e.from === scenario.targetHubId).length,
+        scenarioOutboundRequests: shockEvents.filter((e) => e.from === scenario.targetHubId).length,
+        initialAvailableVehicles: initialVehicles,
+        scenarioAvailableVehicles: [...changed.vehicles.values()].filter(
+          (v) => v.currentHubId === scenario.targetHubId && freeVehicle(changed, v),
+        ).length,
+        initialUsablePorts: [...original.ports.values()].filter(
+          (p) =>
+            p.hubId === scenario.targetHubId &&
+            p.status !== PortStatus.FAULT &&
+            !fault(original, 'CHARGING_PORT', p.id),
+        ).length,
+        scenarioUsablePorts: [...changed.ports.values()].filter(
+          (p) =>
+            p.hubId === scenario.targetHubId &&
+            p.status !== PortStatus.FAULT &&
+            !fault(changed, 'CHARGING_PORT', p.id),
+        ).length,
+        totalPorts: [...original.ports.values()].filter((p) => p.hubId === scenario.targetHubId)
+          .length,
+      },
       actions: coordinated.actions,
       timeline: affected.frames,
       effects,
@@ -190,6 +217,7 @@ export class WhatIfEngine {
         'Chuyến thuê và lệnh đang vận chuyển khi chụp snapshot được giả định đến đích sau 10 phút; lệnh chưa nhận không tự bắt đầu.',
         'Xe được cấp chỗ trả trước khi xuất phát. Chỉ có xe dùng chung đủ pin và chưa bị chiếm dụng được phân bổ.',
         'Người dùng bắt đầu sạc ở bước sau khi được cấp cổng, ngắt kết nối một bước sau khi đạt mục tiêu.',
+        'Công suất Hub bằng tổng công suất định mức các cổng. Chỉ cấp cổng còn trống, không lỗi; không có một giới hạn điện thấp hơn tổng này.',
         'Giữ ít nhất 2 xe khả dụng ở nguồn; tối đa 3 hành động điều phối/chuyển hướng, mỗi lệnh chuyển tối đa 3 xe. Đây là heuristic, không bảo đảm tối ưu toàn cục.',
         'Lượt được phục vụ được tính khi xe xuất phát và có chỗ trả cam kết; xe chưa tới cuối kỳ vẫn đang di chuyển.',
       ],
@@ -722,8 +750,7 @@ export class WhatIfEngine {
             p.hubId === h.id &&
             p.status === PortStatus.FREE &&
             !fault(s, 'CHARGING_PORT', p.id) &&
-            (!r.preferredPortId || p.id === r.preferredPortId) &&
-            powerUsed(s, h.id) + p.powerKw <= h.chargingBudgetKw,
+            (!r.preferredPortId || p.id === r.preferredPortId),
         );
         if (p) {
           r.portId = p.id;
@@ -910,9 +937,9 @@ export class WhatIfEngine {
       }
     for (const h of s.hubs.values())
       ensure(
-        powerUsed(s, h.id) <= h.chargingBudgetKw + 1e-8,
+        powerUsed(s, h.id) <= totalChargingPower(s, h.id) + 1e-8,
         'SimulationInvariant',
-        'Mô phỏng vượt ngân sách công suất.',
+        'Mô phỏng vượt tổng công suất các cổng sạc.',
       );
     for (const p of s.ports.values())
       if (fault(s, 'CHARGING_PORT', p.id))

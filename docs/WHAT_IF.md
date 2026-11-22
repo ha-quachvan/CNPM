@@ -23,7 +23,7 @@ Engine chỉ nhận bản sao trạng thái. Không có tham chiếu tới repos
 4. Người dùng bắt đầu phiên đã được cấp cổng ở bước trước.
 5. Xử lý nhu cầu thuê. Chỉ phục vụ khi có xe dùng chung đủ pin và chỗ trả hợp lệ. Khi xuất phát, chỗ nguồn được giải phóng và chỗ đích được giữ. Xe chỉ có thể thuê tiếp sau khi đến nơi.
 6. Sinh nhu cầu sạc cho các xe đang đỗ dưới 40% pin, không tạo hai yêu cầu sống cho một xe. Mỗi đợt 10 phút chọn một xe đủ điều kiện tại mỗi Hub; tình huống tăng nhu cầu tăng số yêu cầu tại Hub chọn. Hệ số lẻ dùng phần dư tích lũy, không tự làm tròn thành gấp đôi.
-7. Xếp hàng theo thời điểm cần xe, pin, thời điểm tạo và ID. Chỉ cấp cổng còn rảnh, hợp lệ và đủ công suất; giữ cổng trước khi bắt đầu cũng giữ ngân sách công suất.
+7. Xếp hàng theo thời điểm cần xe, pin, thời điểm tạo và ID. Chỉ cấp cổng còn rảnh, hợp lệ, đúng lựa chọn cổng ưu tiên nếu có. Công suất Hub bằng tổng định mức các cổng; không có một ngân sách điện độc lập làm cổng trống phải chờ. Cổng được giữ hoặc còn kết nối chưa được cấp cho xe khác.
 8. Nếu là lượt chạy có phương án, thử điều chuyển/chuyển hướng phù hợp, tối đa ba hành động trong cả kỳ.
 9. Kiểm tra bảo toàn xe, liên kết chỗ đỗ, giữ chỗ, cổng và công suất; ghi thống kê theo thời điểm.
 
@@ -54,7 +54,18 @@ Mỗi chuyến mô phỏng dùng 3% pin. Đây là giả định đơn giản đ
 
 Heuristic không bảo đảm tối ưu toàn cục. Nó có thể cải thiện tổng lượt phục vụ nhưng tăng tắc nghẽn ở một nơi khác. Engine hiển thị số tính lại và ghi rõ đánh đổi thay vì khẳng định mọi chỉ số đều tốt hơn.
 
-## Đọc kết quả
+## Đọc màn hình chính
+
+1. **Điều gì thay đổi?** Chỉ rõ Hub xảy ra tình huống. Ví dụ, lượt đi ra từ Metro tăng theo hệ số; các chỉ số kết quả vẫn tính trên toàn mạng lưới. `scope` giúp phân biệt nhu cầu của một Hub với tổng lượt toàn mạng lưới.
+2. **Tác động:** với tình huống thuê/đầy/xe tập trung, đọc lượt chưa phục vụ nếu giữ nguyên, lượt chưa phục vụ sau kế hoạch và lượt phục vụ thêm. Mỗi nhóm tách thiếu xe và thiếu chỗ trả; thiếu chỗ là một phần của chưa phục vụ. Với tình huống sạc, đọc số yêu cầu chờ bắt đầu cuối kỳ, số không đạt pin đúng hạn và thời gian chờ lớn nhất; mỗi số có mốc bình thường để đối chiếu.
+3. **Một kế hoạch, nhiều bước:** ba dòng điều chuyển là ba bước trong cùng một kế hoạch, không phải ba phương án tối ưu khác nhau. “Phút 5 tới phút 15” là xuất phát và đến trong đồng hồ mô phỏng, không phải đợi ngoài đời. Chuyển hướng tính theo chuyến, chỉ khi khách đồng ý đổi Hub trả trước khi xuất phát.
+4. **Kết quả và đánh đổi:** phục vụ thêm không có nghĩa đáp ứng hết. Nếu số bị từ chối vì thiếu chỗ tăng thì hiện rõ cảnh báo. Không tô kết quả thành thành công tuyệt đối.
+
+Đối với sạc, màn hình chính so sánh **bình thường với có tình huống, cùng quy tắc phân bổ ưu tiên**. Khuyến nghị là theo dõi hạn cần xe hoặc cử kỹ thuật viên kiểm tra cổng; chưa giả định đã sửa, tăng cổng hoặc tăng công suất. Kế hoạch điều phối xe ở lượt chạy bổ sung không được trình bày như một giải pháp tăng năng lực sạc.
+
+Bảng ba lượt chạy, các bước điều phối bổ sung cho tình huống sạc, diễn biến và giả định đều nằm trong các mục mặc định thu gọn. Việc thu gọn giao diện không bỏ thuật toán, dữ liệu hay các kiểm tra bảo toàn tài nguyên.
+
+## Ý nghĩa các chỉ số chi tiết
 
 - **Yêu cầu thuê:** số lượt được sinh trong cả kỳ, không phải số xe cần hiện diện đồng thời.
 - **Lượt phục vụ:** đã xuất phát và được cam kết chỗ trả; xe chưa tới cuối kỳ vẫn đang di chuyển.
@@ -65,6 +76,8 @@ Heuristic không bảo đảm tối ưu toàn cục. Nó có thể cải thiện
 - **Chờ sạc lớn nhất:** số phút chờ đã quan sát được trong kỳ, gồm thời gian giữ cổng trước khi bắt đầu; các yêu cầu còn chờ chưa có tổng thời gian chờ cuối cùng.
 - **Sạc trễ mốc cần xe:** yêu cầu thuộc kỳ khảo sát có hạn cần xe trong kỳ nhưng chưa đạt mục tiêu đúng hạn; không tính lịch sử đã kết thúc từ trước hoặc yêu cầu chủ động dừng.
 - **Có cải thiện:** lượt thuê được phục vụ tăng và số yêu cầu sạc trễ không tăng. Các chỉ số khác vẫn phải đọc riêng; có cảnh báo nếu tắc nghẽn chỗ trả tăng.
+
+Mỗi cổng cấp tối đa cho một xe. Tổng định mức lắp đặt vẫn bao gồm cổng lỗi, nhưng cổng lỗi không được phân bổ và không làm tăng pin.
 
 Khuyến nghị ở kịch bản sạc có thể là giữ phân bổ theo ưu tiên và cảnh báo không đủ khả năng đáp ứng. Engine không tự tạo thêm cổng, công suất hoặc lợi ích sửa chữa chưa được mô phỏng.
 

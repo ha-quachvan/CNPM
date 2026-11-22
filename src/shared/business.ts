@@ -180,6 +180,16 @@ export function powerUsed(s: NetworkState, hubId: ID): number {
     )
     .reduce((n, p) => n + p.powerKw, 0);
 }
+/** Installed nameplate power; there is no separate, configurable Hub power cap. */
+export function totalChargingPower(s: NetworkState, hubId: ID): number {
+  return (
+    Math.round(
+      [...s.ports.values()]
+        .filter((p) => p.hubId === hubId)
+        .reduce((total, p) => total + p.powerKw, 0) * 100,
+    ) / 100
+  );
+}
 export function resourceHub(s: NetworkState, target: ResourceRef): ID | undefined {
   return target.kind === 'VEHICLE'
     ? s.vehicles.get(target.id)?.currentHubId

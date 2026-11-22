@@ -175,7 +175,7 @@ function assertInventory(x: ReturnType<typeof createSystem>) {
     assert.ok(!s.dispatchSpaceHolds.has(id));
   }
 }
-test('demo seed has six consistent hubs, scarce charging power, history and background actors', () => {
+test('demo seed has six consistent hubs, occupied charging ports, history and background actors', () => {
   const x = createSystem();
   assert.equal(x.repo.list('hubs').length, 6);
   assert.equal(x.repo.list('vehicles').length, 54);
@@ -391,9 +391,16 @@ test('all charge requests enter the same priority queue; customers cannot reques
   );
   throws(() => hold(x, 'customer', 'hub-metro-v1'), 'ResourceConflict');
 });
-test('earlier deadline beats later queue entry; port preference cannot jump the queue', () => {
+test('earlier deadline beats FIFO once a connector is physically released', () => {
   const x = createSystem();
-  x.charging.stop('operator', 'session-seed-active');
+  assert.ok(
+    x.repo.get<any>('reservations', 'charge-seed-wait-1').createdAt <
+      x.repo.get<any>('reservations', 'charge-seed-wait-2').createdAt,
+  );
+  x.charging.stop('technician', 'session-seed-fleet-1');
+  assert.equal(x.repo.get<any>('ports', 'hub-a-c2').status, 'CONNECTED');
+  assert.equal(x.charging.schedule(x.now()), 0);
+  x.charging.disconnect('technician', 'session-seed-fleet-1');
   assert.equal(x.charging.schedule(x.now()), 1);
   assert.equal(x.repo.get<any>('reservations', 'charge-seed-wait-2').status, 'HELD');
   assert.equal(x.repo.get<any>('reservations', 'charge-seed-wait-1').status, 'WAITING');
@@ -405,12 +412,11 @@ test('earlier deadline beats later queue entry; port preference cannot jump the 
     x.repo.list<any>('notifications').filter((n) => n.kind === 'CHARGE_ALLOCATED').length,
     before,
   );
-  assert.equal(x.hubs.getDetail('hub-a').chargingUsedKw, 3.3);
-  assert.equal(x.repo.get<any>('ports', 'hub-a-c1').status, 'CONNECTED');
+  assert.equal(x.hubs.getDetail('hub-a').chargingUsedKw, 8.8);
+  assert.equal(x.repo.get<any>('ports', 'hub-a-c2').status, 'HELD');
 });
 function onePort(x: ReturnType<typeof createSystem>) {
   x.repo.transact((s) => {
-    s.hubs.get('hub-metro')!.chargingBudgetKw = 2.2;
     for (const p of s.ports.values())
       if (p.hubId === 'hub-metro' && p.id !== 'hub-metro-c1') p.status = 'FAULT' as any;
   });
@@ -553,6 +559,12 @@ test('five What-if presets preserve live state, inventory/capacity and determini
         assert.equal(r.metrics.get('totalVehicles'), 54);
         assert.equal(r.timeline!.length, horizonMinutes / 5 + 1);
         assert.ok(r.actions!.length <= 3);
+        assert.equal(r.scope!.scenarioType, type);
+        assert.equal(r.scope!.targetHubId, scenario.targetHubId);
+        assert.equal(r.scope!.horizonMinutes, horizonMinutes);
+        assert.ok(r.scope!.scenarioUsablePorts <= r.scope!.initialUsablePorts);
+        if (type === ScenarioType.PORT_FAILURE)
+          assert.equal(r.scope!.scenarioUsablePorts, r.scope!.initialUsablePorts - 1);
         for (const frame of r.timeline!)
           for (const h of frame.hubs) assert.ok(h.occupiedSpaces + h.heldSpaces <= h.capacity);
         for (const a of r.actions!) {
@@ -581,6 +593,11 @@ test('unit demand multiplier matches the baseline; surge uses trip counts instea
     seed: 42,
   });
   assert.ok(r.comparison!.scenario.servedTrips > r.metrics.get('baselineVehicles')!);
+  assert.equal(r.scope!.scenarioOutboundRequests, r.scope!.normalOutboundRequests * 2);
+  assert.equal(
+    r.comparison!.scenario.requestedTrips - r.comparison!.baseline.requestedTrips,
+    r.scope!.scenarioOutboundRequests - r.scope!.normalOutboundRequests,
+  );
   assert.ok(r.actions!.length > 0);
   assert.ok(r.comparison!.coordinated.servedTrips > r.comparison!.scenario.servedTrips);
 });
@@ -624,7 +641,7 @@ test('operator can cancel its own fleet charge request and release the vehicle f
 });
 test('simulated failed connector stays faulty after an already stopped session disconnects', () => {
   const x = createSystem();
-  x.charging.stop('operator', 'session-seed-active');
+  x.charging.stop('customer3', 'session-seed-active');
   const snapshot = x.repo.snapshot();
   const scenario = new Scenario({
     id: 'fault-after-stop',
@@ -639,4 +656,76 @@ test('simulated failed connector stays faulty after an already stopped session d
   for (const frame of result.timeline!)
     assert.ok(frame.hubs.find((h) => h.hubId === 'hub-a')!.faultPorts >= 2);
   assert.deepEqual(x.repo.snapshot().state, snapshot.state);
+});
+
+test('Hub power is the sum of installed ports and never independently blocks a free connector', () => {
+  const x = createSystem();
+  x.repo.transact((s) => {
+    s.hubs.get('hub-metro')!.chargingBudgetKw = 0;
+  });
+  assert.equal(x.hubs.getDetail('hub-metro').chargingTotalKw, 11);
+  assert.equal(x.hubs.getDetail('hub-metro').chargingBudgetKw, 11);
+  assert.equal(x.hubs.getDetail('hub-a').chargingTotalKw, 12.1);
+  assert.equal(x.hubs.getDetail('hub-a').faultPorts, 1);
+  assert.equal(x.hubs.getDetail('hub-a').chargingAvailableKw, 0);
+  assert.equal(x.hubs.getDetail('hub-a').chargingActiveKw, 8.8);
+  x.charging.request('customer', {
+    vehicleId: 'personal-1',
+    hubId: 'hub-metro',
+    targetBattery: 80,
+  });
+  x.charging.request('customer6', {
+    vehicleId: 'personal-4',
+    hubId: 'hub-metro',
+    targetBattery: 80,
+  });
+  for (const n of [1, 2, 3])
+    x.charging.request('operator', {
+      vehicleId: `hub-metro-v${n}`,
+      hubId: 'hub-metro',
+      targetBattery: 95,
+    });
+  assert.equal(x.charging.schedule(x.now()), 4);
+  const hub = x.hubs.getDetail('hub-metro');
+  assert.equal(hub.chargingUsedKw, 11);
+  assert.equal(hub.freePorts, 0);
+  const waiting = x.repo
+    .list<any>('reservations')
+    .filter((r) => r.hubId === 'hub-metro' && r.status === 'WAITING');
+  assert.equal(waiting.length, 1);
+  assert.match(waiting[0].waitingReason, /cổng trống/);
+});
+
+test('charging controls belong to personal owner or fleet technician, never Operator', () => {
+  const x = createSystem();
+  const initial = x.repo.snapshot().state;
+  for (const user of ['operator', 'technician', 'customer2'])
+    throws(() => x.charging.stop(user, 'session-seed-active'), 'Forbidden');
+  assert.deepEqual(x.repo.snapshot().state, initial);
+  const request = x.charging.request('operator', {
+    vehicleId: 'hub-metro-v1',
+    hubId: 'hub-metro',
+    targetBattery: 90,
+  });
+  x.charging.schedule(x.now());
+  throws(() => x.charging.start('operator', request.id), 'Forbidden');
+  throws(() => x.charging.start('customer', request.id), 'Forbidden');
+  const session = x.charging.start('technician', request.id);
+  throws(() => x.charging.stop('operator', session.id), 'Forbidden');
+  throws(() => x.charging.disconnect('operator', session.id), 'Forbidden');
+  throws(
+    () =>
+      x.charging.request('technician', {
+        vehicleId: 'hub-metro-v2',
+        hubId: 'hub-metro',
+        targetBattery: 90,
+      }),
+    'Forbidden',
+  );
+  x.charging.stop('technician', session.id);
+  x.charging.disconnect('technician2', session.id);
+  assert.equal(x.repo.get<any>('chargingSessions', session.id).status, 'CANCELLED');
+  x.charging.stop('customer3', 'session-seed-active');
+  x.charging.disconnect('customer3', 'session-seed-active');
+  assertInventory(x);
 });

@@ -2194,3 +2194,57 @@ tbody tr:hover {
     padding: 14px;
   }
 }
+
+/* Static What-if shows traceable inputs, resource counts and conditional plans. */
+.simulation-inputs {
+  margin: 0 0 22px;
+  display: grid;
+  gap: 12px;
+}
+.simulation-inputs > div {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.simulation-inputs dt {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.simulation-inputs dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+}
+.static-result h3 {
+  font-size: 14px;
+  margin: 18px 0 12px;
+}
+.static-calculations {
+  padding: 0 0 10px;
+}
+.static-calculations p {
+  font-size: 12px;
+  line-height: 1.9;
+  margin-bottom: 7px;
+}
+.static-network {
+  margin-top: 22px;
+}
+.resource-inactive {
+  color: var(--muted);
+  background: #fafbfd;
+}
+.proposal-assumptions {
+  margin: 12px 0 18px;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.static-details h3 {
+  margin-top: 20px;
+}
+.static-details .assumptions {
+  margin-top: 20px;
+}

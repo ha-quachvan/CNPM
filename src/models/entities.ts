@@ -208,28 +208,24 @@ export class Scenario {
   id!: ID;
   creatorId!: ID;
   type!: ScenarioType;
-  targetHubId!: ID;
-  parameters!: Map<string, number>;
-  horizonMinutes!: number;
-  seed!: number;
+  targetHubId?: ID;
+  parameters!: Map<string, number | string>;
   constructor(data: Partial<Scenario> = {}) {
     Object.assign(this, data);
   }
 }
-
 export class SimulationResult {
   scenarioId!: ID;
   generatedAt!: Timestamp;
+  type!: ScenarioType;
+  targetHubId?: ID;
+  targetHubName!: string;
+  inputs!: { label: string; value: string }[];
   metrics!: Map<string, number>;
+  assessment!: import('./types.js').SimulationAssessment;
+  proposals!: import('./types.js').SimulationProposal[];
   recommendations!: string[];
-  comparison?: import('./types.js').SimulationComparison;
-  scope?: import('./types.js').SimulationScope;
-  proposal?: import('./types.js').SimulationProposal;
-  candidatesTested?: number;
-  actions?: import('./types.js').SimulationAction[];
-  timeline?: import('./types.js').SimulationFrame[];
-  assumptions?: string[];
-  effects?: string[];
+  assumptions!: string[];
   constructor(data: Partial<SimulationResult> = {}) {
     Object.assign(this, data);
   }

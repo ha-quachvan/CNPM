@@ -12,13 +12,10 @@ export const config = Object.freeze({
   loginWindowMinutes: 15,
   maxLoginFailures: 5,
   jobIntervalMs: 1000,
-  simulationTimeoutMs: 15000,
-  maxScenarioMinutes: 120,
-  simulationStepMinutes: 5,
-  dispatchReserveVehicles: 2,
-  maxSimulationCandidates: 12,
+  whatIfReserveVehicles: 3,
+  whatIfMaxInput: 1000,
+  whatIfChargeTarget: 80,
   simulationAnalysisMinutes: 10,
   maxSimulationAnalyses: 20,
-  maxDispatchVehicles: 3,
 });
 export const minute = 60_000;

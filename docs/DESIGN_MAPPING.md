@@ -84,28 +84,30 @@ Các Entity giữ dữ liệu, có constructor để thuận tiện tạo đối
 
 - API Layer dùng module hàm Express trong `routes/`, `controllers/` và `middleware/`.
 - `system.ts` tạo đúng một repository dùng chung cho mỗi instance backend và truyền vào các Service. Reset demo tạo lại instance này.
-- `tests/domain.test.ts` kiểm tra các quy tắc/trạng thái và hoàn tác. `tests/api.test.ts` kiểm tra HTTP, phân quyền và JSON. `tests/browser.mjs` kiểm tra các thao tác qua giao diện ba vai trò, responsive và lỗi JavaScript.
+- `tests/what-if.test.ts` kiểm tra What-if tĩnh và bảo toàn tài nguyên; `tests/domain.test.ts` kiểm tra các quy tắc/trạng thái và hoàn tác. `tests/api.test.ts` kiểm tra HTTP, phân quyền và JSON. `tests/browser.mjs` kiểm tra các thao tác qua giao diện ba vai trò, responsive và lỗi JavaScript.
 - Mẫu giao diện tham khảo: [shadcn/ui dashboard](https://ui.shadcn.com/examples/dashboard). Cài đặt dùng HTML/CSS/JavaScript thuần theo phạm vi đã thống nhất, với thiết kế mới cho nhóm.
 
 ## Bổ sung khi hoàn thiện MVP
 
 Tài liệu Submission 3 gốc được giữ nguyên theo yêu cầu của nhóm. Danh mục M01–M45 ở trên là mã đối chiếu của thiết kế gốc. MVP bổ sung hành vi sau; không coi mã triển khai vẫn chỉ có đúng 45 phương thức:
 
-| Phần bổ sung                           | Nơi triển khai                       | Mục đích                                                                           |
-| -------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `ReservationService.changeDestination` | `POST /reservations/:id/destination` | Giữ chỗ đích mới trước khi giải phóng chỗ cũ; cập nhật chuyến đang chạy            |
-| `ReservationService.checkoutParking`   | `POST /vehicles/:id/checkout`        | Kết thúc lượt gửi và giải phóng chỗ cá nhân                                        |
-| `ChargingService.stop`                 | `POST /charging/:id/stop`            | Ngừng cấp điện, còn chờ ngắt kết nối                                               |
-| `ChargingService.disconnect`           | `POST /charging/:id/disconnect`      | Giải phóng đầu nối sau khi ngừng sạc                                               |
-| Thuộc tính đích trả                    | VehicleReservation, Rental           | `plannedReturnHubId`, `plannedReturnSpaceId`; phân biệt nơi đăng ký và nơi thực tế |
-| Dữ liệu lượt gửi/thông báo             | `types.ts`, NetworkState             | ParkingVisit, Notification, returnSpaceHolds; không kết nối DB                     |
-| Cơ chế phân bổ dùng chung              | `shared/scheduling.ts`               | Ưu tiên và công thức pin được dùng bởi nghiệp vụ vận hành và What-if               |
-| Mô hình What-if theo thời gian         | `WhatIfEngine`, `data/demand.ts`     | Phân tích tác động, tìm kiếm lệnh một bước và thử riêng trên bản sao đã lưu        |
+| Phần bổ sung                           | Nơi triển khai                       | Mục đích                                                                              |
+| -------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------- |
+| `ReservationService.changeDestination` | `POST /reservations/:id/destination` | Giữ chỗ đích mới trước khi giải phóng chỗ cũ; cập nhật chuyến đang chạy               |
+| `ReservationService.checkoutParking`   | `POST /vehicles/:id/checkout`        | Kết thúc lượt gửi và giải phóng chỗ cá nhân                                           |
+| `ChargingService.stop`                 | `POST /charging/:id/stop`            | Ngừng cấp điện, còn chờ ngắt kết nối                                                  |
+| `ChargingService.disconnect`           | `POST /charging/:id/disconnect`      | Giải phóng đầu nối sau khi ngừng sạc                                                  |
+| Thuộc tính đích trả                    | VehicleReservation, Rental           | `plannedReturnHubId`, `plannedReturnSpaceId`; phân biệt nơi đăng ký và nơi thực tế    |
+| Dữ liệu lượt gửi/thông báo             | `types.ts`, NetworkState             | ParkingVisit, Notification, returnSpaceHolds; không kết nối DB                        |
+| Cơ chế phân bổ dùng chung              | `shared/scheduling.ts`               | Ưu tiên và công thức pin được dùng bởi nghiệp vụ vận hành và What-if                  |
+| Mô hình What-if tĩnh                   | `WhatIfEngine`, `WhatIfService`      | Đếm nguồn lực, điều phối tham lam, ghép hàng chờ và thử phương án trên bản sao đã lưu |
 
 `reserveVehicle` bổ sung đầu vào Hub trả; sạc luôn qua hàng đợi, trạng thái AWAITING_DISCONNECT/CONNECTED phân biệt ngừng điện và rảnh cổng. Các thay đổi được giải thích trong README, API và hướng dẫn demo; không sửa PDF/LaTeX Submission 3.
 
-## What-if hai bước và bản đồ Hub
+## What-if tĩnh và bản đồ Hub
 
-Giao diện What-if trình bày tác động trước, nút thử đề xuất sau. `WhatIfService.trial` và `WhatIfEngine.evaluate` là phương thức bổ sung để đánh giá riêng một lệnh điều chuyển trên bản sao đã lưu. Các phương thức M36/M37 hiện có vẫn giữ đầu vào phân tích tình huống; đối chiếu 30 lớp và 45 phương thức gốc không thay đổi tài liệu Submission 3.
+What-if dùng bản sao RAM tại một thời điểm, không còn lịch nhu cầu sinh sẵn, seed, khoảng khảo sát hoặc vòng lặp 5 phút. Năm loại tình huống vẫn được hỗ trợ nhưng dùng đầu vào minh bạch: số xe cần có/nhu cầu nền × hệ số, số chỗ muốn đạt, mức xe tối thiểu, số yêu cầu sạc thêm, mã cổng lỗi cụ thể. Xem công thức và ví dụ trong [WHAT_IF.md](WHAT_IF.md).
 
-`HubSummaryDTO.travelMinutesTo` dùng chung `travelMinutes` với mô phỏng. `public/js/hub-map.js` bố trí sơ đồ bằng tọa độ mẫu, dùng nút HTML để chọn bằng chuột hoặc bàn phím, lọc cùng danh sách và mở chi tiết Hub hiện có. Không thêm bản đồ ngoài, cơ sở dữ liệu hoặc phần cứng.
+`WhatIfService.trial` và `WhatIfEngine.evaluate` bổ sung bước thử phương án đã lưu. Server kiểm tra phương án thuộc đúng bản sao và Operator, không chấp nhận lệnh tự dựng từ client. Các hành động điều chuyển, giữ cổng, khôi phục cổng hoặc rút dây chỉ xảy ra trên bản sao; không thay đổi nghiệp vụ thật. M36/M37/M43 có điều chỉnh dữ liệu đầu vào/kết quả để phù hợp cách tính tĩnh; danh mục 30 lớp và 45 phương thức trên vẫn là đối chiếu thiết kế gốc, không sửa PDF/LaTeX Submission 3.
+
+`HubSummaryDTO.travelMinutesTo` lấy thời gian tham khảo từ `src/data/hubTravel.ts`, độc lập với What-if. `public/js/hub-map.js` bố trí sơ đồ bằng tọa độ mẫu, dùng nút HTML để chọn bằng chuột hoặc bàn phím, lọc cùng danh sách và mở chi tiết Hub hiện có. Không thêm bản đồ ngoài, cơ sở dữ liệu hoặc phần cứng.

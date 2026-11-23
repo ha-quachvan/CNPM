@@ -284,64 +284,100 @@ try {
   const order = (await ws(operator)).dispatchOrders.find((o) => o.status === 'PENDING');
   assert.ok(order);
   await navigate(operator, 'what-if');
-  await operator.getByRole('button', { name: 'Phân tích tình huống', exact: true }).click();
-  await operator.getByRole('heading', { name: 'Tác động của tình huống', exact: true }).waitFor();
-  assert.equal(await operator.locator('.impact-details[open]').count(), 0);
-  assert.equal(await operator.locator('.trial-result').count(), 0);
-  await operator
-    .locator('.scope-label')
-    .getByText('Kết quả toàn mạng lưới', { exact: false })
-    .waitFor();
-  assert.equal(await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).count(), 0);
-  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
-  await operator.screenshot({ path: 'artifacts/whatif-impact.png', fullPage: true });
-  const trialResponse = operator.waitForResponse((r) => r.url().endsWith('/api/what-if/trial'));
-  await operator.getByRole('button', { name: 'Thử đề xuất này', exact: true }).click();
-  const trial = await (await trialResponse).json();
-  await operator
-    .getByRole('heading', { name: 'Hiệu quả của một lệnh điều chuyển', exact: true })
-    .waitFor();
-  assert.ok(trial.after.servedTrips > trial.before.servedTrips);
-  assert.equal(trial.before.requestedTrips, trial.after.requestedTrips);
-  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
-  await operator.screenshot({ path: 'artifacts/whatif-single-trial.png', fullPage: true });
-  await operator.locator('[name=parameter]').fill('2.5');
-  assert.equal(await operator.locator('[data-action=whatif-trial]').isDisabled(), true);
-  assert.equal(await operator.locator('#whatif-stale').isVisible(), true);
-  for (const type of ['HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE']) {
-    await operator.locator('#scenario-type').selectOption(type);
+  const metric = (assessment, key) => assessment.metrics.find((m) => m.key === key)?.value;
+  const calculate = async () => {
     const response = operator.waitForResponse(
       (r) => r.url().endsWith('/api/what-if') && r.request().method() === 'POST',
     );
-    await operator.getByRole('button', { name: 'Phân tích tình huống', exact: true }).click();
-    assert.equal((await response).status(), 200);
-    await operator.getByText('Mô phỏng hoàn tất.', { exact: true }).last().waitFor();
-    assert.equal(await operator.locator('#scenario-type').inputValue(), type);
+    await operator.getByRole('button', { name: 'Tính phương án', exact: true }).click();
+    const r = await response;
+    assert.equal(r.status(), 200);
+    const result = await r.json();
+    await operator.waitForFunction(
+      () => !document.querySelector('#whatif-form [type=submit]').disabled,
+    );
+    await operator.getByRole('heading', { name: 'Đánh giá tài nguyên', exact: true }).waitFor();
     assert.equal(await operator.locator('#whatif-error').isVisible(), false);
     assert.equal(await operator.locator('#whatif-stale').isVisible(), false);
     assert.equal(await operator.locator('.trial-result').count(), 0);
-    assert.equal(await operator.locator('.impact-details[open]').count(), 0);
-    if (['CHARGING_SURGE', 'PORT_FAILURE'].includes(type)) {
-      await operator.getByText('Chờ lâu nhất ghi nhận', { exact: true }).waitFor();
-      assert.equal(await operator.locator('[data-action=whatif-trial]').count(), 0);
-      await operator.waitForFunction(
-        () => document.querySelector('#toasts').childElementCount === 0,
-      );
-      await operator.screenshot({
-        path: `artifacts/whatif-${type.toLowerCase()}.png`,
-        fullPage: true,
-      });
-    }
-  }
-  if (await operator.locator('[data-action=whatif-trial]').count()) {
+    assert.equal(await operator.locator('.static-details[open]').count(), 0);
+    return result;
+  };
+  const tryPlan = async (result, proposal = result.proposals[0]) => {
+    assert.ok(proposal);
+    if (await operator.locator('#proposal-choice').count())
+      await operator.locator('#proposal-choice').selectOption(proposal.id);
+    const response = operator.waitForResponse((r) => r.url().endsWith('/api/what-if/trial'));
     await operator.locator('[data-action=whatif-trial]').click();
-    await operator.locator('.trial-result').waitFor();
-  }
-  await operator.locator('.impact-details summary').click();
-  assert.equal(await operator.locator('.impact-details').evaluate((n) => n.open), true);
-  assert.ok(await operator.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-  await operator.locator('.impact-details summary').click();
+    const r = await response;
+    assert.equal(r.status(), 200);
+    const trial = await r.json();
+    await operator.getByRole('heading', { name: 'Kết quả thử phương án', exact: true }).waitFor();
+    assert.deepEqual(trial.before, result.assessment);
+    assert.equal(trial.proposalId, proposal.id);
+    return trial;
+  };
+  assert.equal(await operator.locator('[name=horizonMinutes], [name=seed]').count(), 0);
+  const demand = await calculate();
+  assert.equal(metric(demand.assessment, 'requiredVehicles'), 8);
+  await operator.getByRole('heading', { name: 'Phép tính', exact: true }).waitFor();
+  assert.equal(
+    await operator
+      .getByRole('heading', { name: 'Cơ sở từ toàn mạng lưới', exact: true, includeHidden: true })
+      .count(),
+    1,
+  );
   await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
+  await operator.screenshot({ path: 'artifacts/whatif-impact.png', fullPage: true });
+  const vehicleTrial = await tryPlan(demand);
+  assert.ok(metric(vehicleTrial.after, 'shortage') < metric(vehicleTrial.before, 'shortage'));
+  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
+  await operator.screenshot({ path: 'artifacts/whatif-single-trial.png', fullPage: true });
+  await operator.locator('[name=requiredVehicles]').fill('9');
+  assert.equal(await operator.locator('[data-action=whatif-trial]').isDisabled(), true);
+  assert.equal(await operator.locator('#whatif-stale').isVisible(), true);
+  await operator.locator('[name=demandMode]').selectOption('MULTIPLIER');
+  await operator.locator('[name=baselineDemand]').fill('4');
+  await operator.locator('[name=multiplier]').fill('2');
+  const multiplied = await calculate();
+  assert.equal(metric(multiplied.assessment, 'requiredVehicles'), 8);
+  for (const type of ['HUB_FULL', 'VEHICLE_IMBALANCE', 'CHARGING_SURGE', 'PORT_FAILURE']) {
+    await operator.locator('#scenario-type').selectOption(type);
+    if (type === 'VEHICLE_IMBALANCE')
+      assert.equal(await operator.locator('#whatif-form [name=targetHubId]').count(), 0);
+    const result = await calculate();
+    assert.equal(await operator.locator('#scenario-type').inputValue(), type);
+    if (type === 'CHARGING_SURGE') {
+      const recovery = result.proposals.find((p) => p.id === 'recover:hub-a-c4');
+      const trial = await tryPlan(result, recovery);
+      assert.ok(metric(trial.after, 'assignedByPlan') > 0);
+      assert.ok(metric(trial.after, 'totalWaiting') < metric(trial.before, 'totalWaiting'));
+    } else if (type === 'PORT_FAILURE') {
+      const trial = await tryPlan(
+        result,
+        result.proposals.find((p) => p.id === 'recover:hub-a-c1'),
+      );
+      assert.equal(metric(trial.after, 'affectedSessions'), 0);
+      assert.equal(metric(trial.after, 'assignedByPlan'), 0);
+      assert.equal(metric(trial.after, 'freePorts'), 0);
+      await operator.locator('[name=portId]').selectOption('hub-a-c4');
+      const emptyFault = await calculate();
+      const repair = await tryPlan(
+        emptyFault,
+        emptyFault.proposals.find((p) => p.id === 'recover:hub-a-c4'),
+      );
+      assert.equal(metric(repair.after, 'assignedByPlan'), 1);
+    } else if (result.proposals.length) await tryPlan(result);
+    await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
+    await operator.screenshot({
+      path: `artifacts/whatif-${type.toLowerCase()}.png`,
+      fullPage: true,
+    });
+  }
+  await operator.locator('.static-details summary').click();
+  assert.equal(await operator.locator('.static-details').evaluate((n) => n.open), true);
+  assert.ok(await operator.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await operator.locator('.static-details summary').click();
   await operator.screenshot({ path: 'artifacts/whatif-desktop.png', fullPage: true });
   await navigate(technician, 'incidents');
   await technician.locator(`[data-action=incident-accept][data-id="${incident.id}"]`).click();

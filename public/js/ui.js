@@ -48,11 +48,11 @@ export const labels = {
   PARKING: 'Chỗ đỗ',
   SHARED: 'Dùng chung',
   PERSONAL: 'Cá nhân',
-  DEMAND_SURGE: 'Nhu cầu di chuyển tăng',
-  HUB_FULL: 'Hub đầy chỗ đỗ',
-  CHARGING_SURGE: 'Nhu cầu sạc tăng',
-  PORT_FAILURE: 'Cổng sạc gặp sự cố',
-  VEHICLE_IMBALANCE: 'Xe tập trung tại một Hub',
+  DEMAND_SURGE: 'Nhu cầu cấp xe tại Hub',
+  HUB_FULL: 'Giải phóng chỗ đỗ',
+  CHARGING_SURGE: 'Thêm yêu cầu sạc',
+  PORT_FAILURE: 'Cổng sạc lỗi',
+  VEHICLE_IMBALANCE: 'Cân bằng xe toàn mạng lưới',
 };
 export const label = (v) => labels[v] || v || '—';
 const paths = {

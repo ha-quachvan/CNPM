@@ -1,94 +1,128 @@
-# What-if: phân tích tác động và thử một đề xuất
+# What-if: kiểm tra tài nguyên tại một thời điểm
 
-## Cách đọc giao diện
+What-if trả lời câu hỏi: **Với tài nguyên hiện có và một nhu cầu giả định rõ ràng, hệ thống đáp ứng được bao nhiêu và có thể phân bổ lại thế nào?**
 
-1. Chọn tình huống, Hub và mức thay đổi. Mặc định 60 phút; thời gian và seed nằm trong Tùy chọn mô phỏng.
-2. Bấm **Phân tích tình huống**. Màn hình chỉ so sánh **Bình thường / Có tình huống**, rồi đưa ra một kết luận. Các chỉ số tính trên **toàn mạng lưới**, tình huống chỉ tác động Hub được chọn.
-3. Nếu có một lệnh điều chuyển phù hợp, bấm **Thử đề xuất này**. Kết quả mới so sánh **Giữ nguyên / Thực hiện đề xuất**, cùng nhu cầu khi có tình huống. Chưa tạo lệnh vận hành thật.
-4. Chỉ mở **Chi tiết mô phỏng** khi cần giải thích thuật toán, nguyên nhân và diễn biến.
+Không tạo lịch thuê giả, không sinh Hub trả, không chạy theo bước thời gian. Các số như “48 lượt bình thường”, “61 lượt trong 60 phút”, seed, thời gian chờ hoặc dự báo sạc trễ đã được bỏ. Bản đồ Hub vẫn có thời gian tham khảo riêng, không dùng để tính What-if.
 
-Nhóm nhu cầu thuê/Hub đầy/xe tập trung hiển thị hai hàng: tổng yêu cầu thuê và lượt chưa được phục vụ. Nhóm nhu cầu sạc/cổng lỗi hiển thị phiên đạt pin mục tiêu và thời gian chờ lớn nhất. Cảnh báo ngắn xuất hiện khi có thêm yêu cầu sạc hết hạn hoặc trễ hạn cần xe.
+## Cơ sở số liệu đầu vào
 
-Khi thay đổi thiết lập, kết quả cũ vẫn mang tên và thời gian của tình huống cũ, nút thử bị khóa và yêu cầu phân tích lại. Một phân tích được giữ 10 phút và chỉ Operator đã tạo mới được thử; RAM giữ tối đa 20 phân tích. Reset hoặc khởi động lại xóa các bản sao.
+Dữ liệu lấy từ bản sao RAM tại lúc bấm **Tính phương án**:
 
-## Dữ liệu và giả định
+- Các Hub đang hoạt động, xe dùng chung đủ pin và thực sự còn rảnh.
+- Chỗ trống chưa có người giữ, kể cả các cam kết trả xe và điều phối.
+- Cổng sạc, sự cố, xe đang cắm, phiên sạc, yêu cầu đang chờ và hạn cần xe.
+- Giả định do Operator nhập: số xe cần có, số chỗ muốn giải phóng, mức xe tối thiểu hoặc số yêu cầu sạc mới.
 
-Engine chỉ làm việc trên bản sao trạng thái. Lịch nhu cầu theo các tuyến trong `src/data/demand.ts` và seed; cùng lịch nền được dùng để so sánh. Đây là nhu cầu giả lập cấu hình sẵn.
-
-- Hub, xe, pin, cổng, các giữ chỗ và phiên đang hoạt động lấy tại lúc bấm phân tích.
-- Tuyến có thời gian giả định 5–15 phút; cặp chưa khai báo dùng 10 phút. Bản đồ Hub dùng đúng cùng bảng thời gian qua trường `travelMinutesTo`. Tọa độ chỉ tạo sơ đồ vị trí tương đối; chưa tính đường đi thực tế.
-- Xe đang thuê/lệnh đang vận chuyển được giả định tới nơi sau 10 phút; lệnh PENDING không tự bắt đầu.
-- Mỗi chuyến thuê dùng 3% pin. Lượt được phục vụ tính khi xuất phát và đã giữ chỗ trả, kể cả chuyến chưa tới cuối kỳ.
+Không dùng số xe rảnh để tự suy ra nhu cầu. Mặc định giữ **3 xe rảnh tại mỗi Hub nguồn** là chính sách demo, không phải kết quả dự báo. Mỗi xe chỉ phục vụ một yêu cầu trong đợt cấp xe giả định.
 
 ## Năm tình huống
 
-| Tình huống             | Tác động trên bản sao                                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Nhu cầu di chuyển tăng | Tăng lượt đi ra từ Hub chọn theo hệ số; các tuyến khác giữ nguyên                                                   |
-| Hub đầy                | Chuyển các xe hiện có từ nguồn còn dự phòng tới chỗ trống ở Hub chọn; ghi đúng số đã áp dụng, không giả tạo thêm xe |
-| Xe tập trung           | Tương tự Hub đầy, nhưng theo số xe bổ sung khai báo và sức chứa thực sự còn lại                                     |
-| Nhu cầu sạc tăng       | Tăng nhịp tạo yêu cầu sạc cho các xe đủ điều kiện tại Hub chọn; một xe tối đa một yêu cầu sống                      |
-| Cổng lỗi               | Làm lỗi thêm các cổng còn dùng được, gồm cả cổng đang sạc. Không giả định sửa xong trong kỳ                         |
+| Tình huống trên UI         | Đầu vào                                                          | Kết quả chính                                             | Phương án                                                          |
+| -------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
+| Nhu cầu cấp xe tại Hub     | Hub và số xe cần có; hoặc nhu cầu nền × hệ số do người dùng nhập | Hiện có, cần có, thiếu và chỗ nhận                        | Lấy từ nguồn có nhiều xe có thể cho đi nhất                        |
+| Giải phóng chỗ đỗ          | Hub và số chỗ trống muốn đạt                                     | Chỗ trống, còn thiếu, xe chung có thể chuyển              | Chuyển xe rảnh sang Hub có nhiều chỗ nhận nhất                     |
+| Cân bằng xe toàn mạng lưới | Mức xe tối thiểu tại mỗi Hub                                     | Hub dưới mức, tổng thiếu và tổng xe khả dụng              | Bổ sung Hub ít xe trước, lấy từ nguồn dư nhiều nhất                |
+| Thêm yêu cầu sạc           | Hub và số yêu cầu giả định thêm                                  | Tổng yêu cầu chờ, cấp ngay được, còn phải chờ             | Cấp cổng; thử khôi phục cổng lỗi hoặc rút dây phiên đã dừng nếu có |
+| Cổng sạc lỗi               | Hub và mã một cổng cụ thể                                        | Cổng còn dùng được, phiên/giữ cổng bị ảnh hưởng, hàng chờ | Thử khôi phục cổng đã chọn; cấp các cổng thực sự trống             |
 
-## Một bước 5 phút
+## 1. Nhu cầu cấp xe và thuật toán điều phối
 
-1. Hết hạn các yêu cầu WAITING/HELD và giải phóng tài nguyên tương ứng.
-2. Xử lý xe tới nơi bằng chỗ đã giữ. Xe điều chuyển chỉ phục vụ được sau lúc đến.
-3. Cập nhật pin theo công suất cổng; cổng/xe lỗi không tăng pin. Đạt mục tiêu chuyển sang chờ rút dây, mô hình giả định rút ở bước sau.
-4. Bắt đầu các phiên được giữ cổng ở bước trước.
-5. Xử lý nhu cầu thuê bằng xe dùng chung đủ điều kiện và chỗ trả có thể cam kết. Thiếu xe hoặc thiếu chỗ thì ghi nhận chưa phục vụ; không tự chuyển hướng sang Hub trả khác.
-6. Mỗi đợt 10 phút sinh nhu cầu sạc cho xe đang đỗ dưới 40% pin, mục tiêu 80%, cần xe sau 40 phút. Hệ số lẻ giữ phần dư để tạo nhịp 1,2,1,2 khi hệ số 1.5 và đủ xe.
-7. Xếp ưu tiên sạc theo hạn cần xe, pin thấp, tạo trước, ID. Chỉ cấp cổng rảnh, không lỗi, đúng Hub/cổng ưu tiên nếu có. Tổng công suất Hub bằng tổng định mức cổng.
-8. Kiểm tra bảo toàn xe, sức chứa, liên kết xe/chỗ, giữ chỗ và một cổng/một xe; ghi diễn biến.
+Gọi `R` là số xe cần có, `F` là số xe dùng chung khả dụng của Hub đích:
 
-Pin dùng cùng hàm `chargedBattery` với nghiệp vụ vận hành:
+```text
+Thiếu = max(0, R − F)
+Nguồn có thể cho đi = max(0, xe rảnh tại nguồn − 3)
+Số chuyển = min(thiếu còn lại, nguồn có thể cho đi, chỗ nhận còn trống, 50)
+```
 
-`pin mới = min(mục tiêu, 100, pin cũ + công suất kW × thời gian giờ / dung lượng kWh × 100)`.
+Giới hạn 50 là số xe tối đa của một lệnh điều phối. Nếu cần, phương án có thể gồm nhiều lệnh; không dùng một xe hoặc chỗ hai lần.
 
-## Tìm kiếm có giới hạn trên các lệnh điều chuyển
+Thuật toán tham lam:
 
-Đối với nhu cầu thuê tăng, thử chuyển xe từ Hub khác về Hub được chọn. Đối với Hub đầy/xe tập trung, thử chuyển xe ra khỏi Hub được chọn. Không tạo lệnh điều chuyển cho tình huống sạc.
+1. Đếm nguồn lực hợp lệ của toàn mạng lưới, loại Hub tạm ngừng.
+2. Chọn nguồn có nhiều xe có thể cho đi nhất; nếu bằng nhau, dùng thứ tự mã Hub để kết quả ổn định.
+3. Tính số chuyển theo các giới hạn trên và cập nhật bản sao kế hoạch.
+4. Tiếp tục với phần thiếu còn lại đến khi đủ hoặc hết nguồn/chỗ nhận.
+5. Hiển thị từng nguồn–đích–số xe. **Thử phương án** cho biết trạng thái sau khi đã bàn giao, trước khi cấp xe cho khách.
 
-Mỗi phương án chỉ có **một lệnh ngay đầu kỳ**. Các cặp Hub được xét theo thời gian tới nơi, rồi ID. Với mỗi cặp, xét số xe từ 1 tới:
+Không chọn xe cá nhân, xe đã đặt/đang thuê/đang điều phối/đang sạc/chờ sạc, xe lỗi hoặc pin dưới 20%. Chỗ đã giữ cho khách trả xe hoặc cho lệnh điều phối không được dùng lại. Không giả định khách trả xe tại Hub nào vì bước này chỉ đánh giá nguồn lực trước khi cấp xe.
 
-`min(3, xe nguồn khả dụng − 2, chỗ nhận trống)`.
+### Ví dụ kiểm tra được trên dữ liệu mới khởi động
 
-Xe đang thuê, sạc, chờ sạc, bị giữ, lỗi hoặc không đủ pin không được chọn. Lệnh phải tới trước khi hết kỳ. Tối đa 12 phương án được chạy độc lập trên cùng tình huống; mỗi lệnh giữ chỗ nhận trước khi xuất phát. Đây là tìm kiếm có giới hạn, không bảo đảm tối ưu đa bước.
+Chọn Metro, nhập cần **8 xe**:
 
-Một phương án chỉ được đề xuất nếu:
+- Metro có **4 xe** khả dụng, nên thiếu `8 − 4 = 4` xe; còn **14 chỗ nhận**.
+- KTX A có **12 xe** khả dụng, có thể cho đi `12 − 3 = 9` xe, nhiều nhất trong các nguồn.
+- Đề xuất KTX A → Metro: `min(4, 9, 14, 50) = 4` xe.
+- Sau thử: KTX A còn **8 xe**, Metro có **8 xe**, thiếu **0**, Metro còn **10 chỗ nhận**.
 
-- Lượt thuê được phục vụ tăng.
-- Số từ chối vì thiếu chỗ trả không tăng.
-- Số yêu cầu sạc trễ hạn không tăng.
+Nếu chọn nhập theo hệ số: **nhu cầu nền 4 × hệ số 2 = cần 8 xe**. Số nền 4 là giả định người nhập, dù tình cờ bằng lượng xe rảnh Metro ban đầu. Không lấy số xe rảnh làm dự báo lượt thuê.
 
-Ưu tiên kết quả phục vụ nhiều hơn, rồi ít từ chối vì thiếu chỗ hơn, ít sạc trễ hơn, tới sớm hơn và dùng ít xe hơn. Nếu chưa có phương án đạt điều kiện thì báo đúng là chưa tìm được; không tự tạo giải pháp giả.
+Nhu cầu không nguyên sau phép nhân được làm tròn lên: nền 3 × 1,5 = 4,5 → cần 5 xe. Nếu nhập cần 100 xe, bản sao chỉ bổ sung được 14 vì Metro chỉ có 14 chỗ nhận: có 18 xe, vẫn thiếu 82. Kết quả không hứa giải quyết được mọi nhu cầu.
 
-Phân tích ban đầu chạy hai mốc so sánh và các lượt thử ứng viên để chọn một đề xuất. Nút **Thử đề xuất này** chạy lại riêng tình huống không can thiệp và tình huống có đúng lệnh đã chọn trên **bản sao đã lưu**. Vì vậy đặt chỗ mới ở mạng lưới thật không làm sai phép so sánh trước/sau.
+Số liệu sẽ thay đổi nếu đã đặt xe, sạc, tạo lệnh hoặc thao tác demo trước đó. Bảng **Cơ sở từ toàn mạng lưới** trong mục **Chi tiết dữ liệu và giả định** là dữ liệu thật của lần tính đó.
 
-## Ví dụ trên dữ liệu mẫu ban đầu
+## 2. Giải phóng chỗ và cân bằng
 
-Nhu cầu tại Metro ×2, 60 phút, seed 42:
+**Giải phóng chỗ:** thiếu chỗ = `max(0, số chỗ muốn đạt − chỗ đang trống)`. Mỗi xe chung đủ điều kiện chuyển ra giải phóng một chỗ. Chọn Hub nhận có nhiều chỗ trống nhất, giữ dự phòng 3 xe tại nguồn. Không di dời xe cá nhân để làm đẹp kết quả.
 
-| Chỉ số                      | Bình thường | Có tình huống |
-| --------------------------- | ----------: | ------------: |
-| Yêu cầu thuê toàn mạng lưới |          48 |            63 |
-| Lượt chưa phục vụ           |           0 |            13 |
+Ví dụ KTX A ban đầu trống 3 chỗ, muốn trống 6: cần giải phóng 3; chuyển 3 xe hợp lệ đến nơi còn chỗ. Nếu không đủ xe có thể chuyển hoặc không còn nơi nhận, vẫn báo số chỗ còn thiếu.
 
-Đề xuất được chọn: chuyển 3 xe Bách khoa → Metro ngay đầu kỳ, tới sau 10 phút. Bấm thử:
+**Cân bằng:** thiếu từng Hub = `max(0, mức tối thiểu − xe rảnh tại Hub)`. Tổng thiếu là tổng các Hub đang hoạt động. Ưu tiên Hub ít xe trước. Nguồn phải giữ `max(3, mức tối thiểu)` xe, tránh vừa bổ sung nơi này lại tạo thiếu ở nơi khác. Tổng xe toàn mạng lưới không đổi.
 
-| Chỉ số            | Giữ nguyên | Thực hiện đề xuất |
-| ----------------- | ---------: | ----------------: |
-| Lượt chưa phục vụ |         13 |                10 |
-| Lượt được phục vụ |         50 |                53 |
+Với dữ liệu ban đầu, mức tối thiểu 6: Metro có 4 nên thiếu 2, các Hub khác đã đủ. Chuyển 2 xe từ KTX A đáp ứng mức này. Đây là cân bằng theo chính sách tồn xe, không phải tối ưu tuyến đường hoặc dự báo nhu cầu.
 
-Kết luận: phục vụ thêm 3 lượt, còn 10 lượt chưa được đáp ứng. Không tăng từ chối do thiếu chỗ trả hoặc số sạc trễ. Các số phụ thuộc trạng thái đầu vào; không cam kết giữ nguyên sau khi đã vận hành thật.
+## 3. Thêm yêu cầu sạc
 
-## Ý nghĩa số liệu bổ sung
+Số yêu cầu mới là giả định Operator nhập. Engine chọn đúng số **xe có thật, đang đỗ tại Hub, chưa có yêu cầu/phiên khác, không lỗi và pin dưới mục tiêu 80%**, ưu tiên xe pin thấp. Số vượt lượng xe hợp lệ bị từ chối; không tạo thêm xe tưởng tượng. Yêu cầu giả định mới chỉ tồn tại trong bản sao, không có hạn cần xe tự bịa.
 
-- **Lượt chưa phục vụ:** yêu cầu bị từ chối tại lúc xử lý, không có hàng chờ thuê và không phục hồi được các lượt đã mất.
-- **Thiếu chỗ trả:** một phần của chưa phục vụ; không cộng thêm lần nữa.
-- **Phiên đạt mục tiêu:** đã đạt pin mục tiêu trong khoảng mô phỏng; có thể vẫn đang chờ rút dây.
-- **Chờ bắt đầu sạc cuối kỳ:** còn WAITING hoặc HELD. Khác với số WAITING ghi ở từng bước diễn biến.
-- **Chờ lâu nhất:** thời gian đã quan sát được trong kỳ, gồm thời gian giữ cổng trước khi bắt đầu; không phải cam kết thời gian chờ cho khách tiếp theo.
-- **Sạc trễ:** yêu cầu có hạn cần xe trong kỳ nhưng chưa đạt mục tiêu đúng hạn; không tính phiên chủ động dừng như một thất bại đạt hạn.
-- **Yêu cầu sạc hết hạn:** không được coi là đã phục vụ xong; cần đọc cùng số đạt mục tiêu, chờ và trễ.
+```text
+Tổng cần xét = yêu cầu đang chờ tại Hub + yêu cầu giả định mới
+Có thể cấp ngay = số cặp yêu cầu–cổng trống hợp lệ ghép được
+Còn phải chờ = tổng cần xét − có thể cấp ngay
+```
+
+Ghép theo quy tắc vận hành hiện có:
+
+1. Hạn cần xe sớm hơn; yêu cầu không có hạn đứng sau yêu cầu có hạn.
+2. Nếu cùng hạn, pin thấp hơn trước.
+3. Nếu cùng pin, yêu cầu được tạo trước trước.
+4. Chỉ dùng cổng khỏe, trống, đúng Hub; nếu yêu cầu chọn cổng cụ thể thì phải chờ đúng cổng đó. Một cổng chỉ cấp một xe.
+
+Không tính thời gian sạc hoặc tốc độ tăng pin ở What-if. Nghiệp vụ sạc thật vẫn cập nhật pin bình thường; thay đổi này chỉ bỏ dự báo theo thời gian trong phần phân tích.
+
+### Đề xuất và cách đọc kết quả thử
+
+- **Cấp cổng theo thứ tự ưu tiên:** chỉ xuất hiện khi có cặp ghép được; nêu rõ xe và cổng.
+- **Giả định khôi phục cổng lỗi:** kỹ thuật viên cần sửa thật. Bản sao kiểm tra cổng đó đang trống, đang giữ hay đang có xe cắm rồi tính lại.
+- **Giả định rút dây:** chỉ với phiên đã dừng, đang chờ ngắt kết nối; cần chủ xe hoặc kỹ thuật viên đội xe thực hiện. Không cắt ngang phiên đang sạc để lấy cổng.
+- Không có nguồn lực phù hợp thì giữ hàng chờ; thay đổi thứ tự không tạo thêm cổng. Không tự chuyển xe cá nhân sang Hub khác.
+
+**Phân biệt hai bảng:** bảng đánh giá ban đầu cho biết _khả năng cấp ngay_. Nút thử mới giả định biến yêu cầu WAITING thành HELD trên bản sao. Bảng trước/sau vì vậy so sánh **số còn trong hàng chờ** và **số đã được giữ cổng theo phương án**, không đếm lại cổng đã giữ như cổng trống.
+
+Ví dụ KTX A mới khởi động có 2 yêu cầu chờ, 3 cổng bận và c4 lỗi đang trống. Giả định thêm 2 yêu cầu hợp lệ:
+
+- Tổng cần xét `2 + 2 = 4`; cấp ngay 0; còn chờ 4.
+- Thử khôi phục c4: giữ c4 cho một yêu cầu, còn chờ 3, số được giữ thêm 1.
+- Yêu cầu đang chờ `charge-seed-wait-2` được chọn trước vì có hạn cần xe sớm. Cổng không được coi là trống sau khi đã giữ.
+
+## 4. Cổng sạc lỗi
+
+Phải chọn một mã cổng, không nhập chung “lỗi 1 cổng” rồi để hệ thống tự chọn. Chỉ các phiên đang sạc tại cổng đó mới tính vào **phiên đang sạc bị ảnh hưởng**; giữ cổng chưa bắt đầu được thống kê riêng. Phiên đã dừng nhưng còn cắm được ghi rõ, không tính thành phiên đang sạc mới bị gián đoạn.
+
+Tại KTX A ban đầu:
+
+- Chọn **hub-a-c1** đang sạc xe của customer3: cổng dùng được từ 3 còn 2, một phiên bị ảnh hưởng. Thử khôi phục: dùng được lại 3, phiên đó được khôi phục, nhưng c1 vẫn bận; **không cấp thêm xe chờ**.
+- Chọn **hub-a-c4** vốn đã lỗi và đang trống: hệ thống ghi nhận trạng thái lỗi hiện có, không trừ hai lần. Thử khôi phục: cổng dùng được từ 3 lên 4; c4 có thể giữ cho một xe chờ.
+- Cổng lỗi đang HELD sau khôi phục vẫn HELD cho xe cũ. Cổng có xe đã dừng, chưa rút dây sau khôi phục vẫn CONNECTED. Sự cố riêng của xe chưa giải quyết thì sửa cổng không tự chữa lỗi xe.
+
+## Giới hạn và tính an toàn của bản sao
+
+- Đây là thuật toán quy tắc + tham lam + ghép hàng chờ, không có học máy hoặc bảo đảm tối ưu toàn cục. Mục đích là giải thích được từng phép tính trong demo 8 phút.
+- Không dự đoán lượt thuê thành công, điểm đến, quãng đường, thời gian chờ, thời điểm xe tới hoặc sạc xong. Tồn xe sau điều phối là trạng thái khi đã hoàn tất bàn giao theo giả định.
+- Phân tích và thử không ghi repository thật, không tạo lệnh/phiên/thông báo, không đóng sự cố thật. Các nguồn lực đang cam kết được bảo toàn.
+- Server lưu bản sao và phương án của đúng Operator trong RAM tối đa 10 phút theo đồng hồ demo, giữ tối đa 20 phân tích. Đây là thời hạn lưu kết quả, không phải khoảng dự báo. Hết hạn/reset/khởi động lại cần tính mới.
+- Lần thử dùng cùng bản sao và cùng nhu cầu ban đầu, kể cả có người đặt xe thật sau đó. Muốn phương án theo trạng thái mới, bấm Tính phương án lại.
+- Sửa đầu vào khiến kết quả cũ được đánh dấu chưa cập nhật và khóa nút thử. Chọn hướng xử lý khác sẽ bỏ bảng thử của hướng trước.
+
+Mã chính: `src/simulation/WhatIfEngine.ts`, `src/services/WhatIfService.ts`. Các kiểm tra tĩnh và bảo toàn nguồn lực ở `tests/what-if.test.ts`, cùng kiểm tra HTTP và giao diện.

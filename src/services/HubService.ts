@@ -27,7 +27,7 @@ import {
   powerUsed,
   totalChargingPower,
 } from '../shared/business.js';
-import { travelMinutes } from '../data/demand.js';
+import { travelMinutes } from '../data/hubTravel.js';
 import { must, numeric, ensure } from '../shared/errors.js';
 export class HubService {
   constructor(private repo: InMemoryRepository) {}

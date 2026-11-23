@@ -46,14 +46,14 @@ Google/Clerk và mã khôi phục mật khẩu là **giả lập**; không gửi
 
 ## Các luồng chính
 
-- **Bản đồ Hub:** sơ đồ tương tác từ tọa độ mẫu, chọn được từng Hub, xem tài nguyên và thời gian di chuyển giả định. Bản đồ và What-if dùng cùng bảng thời gian; không tải bản đồ ngoài hoặc xin vị trí người dùng. Bộ lọc Hub áp dụng đồng thời cho sơ đồ và danh sách.
+- **Bản đồ Hub:** sơ đồ tương tác từ tọa độ mẫu, chọn được từng Hub, xem tài nguyên và thời gian di chuyển giả định để tham khảo. Không tải bản đồ ngoài hoặc xin vị trí người dùng. Bộ lọc Hub áp dụng đồng thời cho sơ đồ và danh sách.
 - **Thuê xe:** chọn xe và Hub trả; giữ xe cùng chỗ đích trong một giao dịch. Giữ xe nhận trong 15 phút; chỗ trả tiếp tục được giữ sau khi nhận. Có thể đổi Hub trả nếu giữ được chỗ mới. Phạt chỉ khi trả khác **Hub đã đăng ký**, không phải khác Hub nhận.
 - **Xe cá nhân:** đặt chỗ → xác nhận đỗ → sạc nếu cần → ngắt kết nối → lấy xe. Lịch sử vào/ra được giữ; lấy xe giải phóng chỗ.
 - **Sạc:** công suất Hub bằng tổng định mức các cổng, không cấu hình một giới hạn thấp hơn. Mỗi cổng chỉ phục vụ một xe; hàng chờ xét hạn cần xe → pin thấp → yêu cầu đến trước, cấp khi có cổng trống phù hợp. Cổng được giữ 15 phút để bắt đầu. Đạt mục tiêu hoặc dừng sạc vẫn phải rút dây để giải phóng cổng. Customer thao tác xe cá nhân; Operator giám sát và đăng ký yêu cầu cho đội xe; Technician bắt đầu/dừng/ngắt sạc xe dùng chung tại Hub. Nhật ký Operator là nhật ký toàn hệ thống, chỉ đọc và mặc định thu gọn.
 - **Thông báo:** được cấp cổng, đạt mục tiêu, dừng/ngắt sạc và hoàn tất dịch vụ. Lưu trong RAM, có trạng thái đã đọc; giao diện cập nhật định kỳ 3 giây khi đủ điều kiện.
 - **Sự cố:** báo → Technician nhận → kiểm tra mô phỏng → hoàn tất; không tự giải phóng tài nguyên còn bận.
 - **Điều phối:** Operator giữ xe nguồn và chỗ nhận; Technician nhận, vận chuyển và bàn giao sau xác minh vị trí.
-- **What-if:** bước đầu chỉ so sánh bình thường / có tình huống, kèm một kết luận. Nhóm thuê xe hiển thị tổng yêu cầu và lượt chưa phục vụ; nhóm sạc hiển thị phiên đạt pin mục tiêu và thời gian chờ lớn nhất. Có thể bấm **Thử đề xuất này** để chạy riêng một lệnh điều chuyển và xem hiệu quả trên đúng bản sao ban đầu. Tối đa 12 phương án được xét, mỗi phương án 1–3 xe; chỉ đề xuất khi cải thiện lượt phục vụ và không tăng thiếu chỗ trả hoặc sạc trễ. Không tự tạo lệnh, tự đổi Hub trả hoặc sửa cổng. Chi tiết kỹ thuật mặc định thu gọn.
+- **What-if tĩnh:** nhập nhu cầu rõ ràng rồi tính thiếu/đủ từ tài nguyên hiện tại, không sinh lượt thuê hay chạy theo thời gian. Điều phối chọn nguồn còn nhiều xe có thể cho đi nhất, giữ tối thiểu 3 xe và tôn trọng chỗ nhận/cam kết hiện có. Ví dụ Metro cần 8 xe, có 4: đề xuất lấy 4 từ KTX A. Phần sạc nêu cổng–xe cụ thể, hàng chờ và hướng xử lý có điều kiện như khôi phục cổng lỗi hoặc rút dây phiên đã dừng. **Thử phương án** so sánh trên cùng bản sao, không thay đổi vận hành thật. Xem [công thức, ví dụ và giới hạn](docs/WHAT_IF.md).
 
 Trong mô hình không có phần cứng, xác nhận đến nơi trong hộp trả/bàn giao xe cung cấp sự kiện vị trí mô phỏng. Công cụ Operator chỉ có tiến thời gian và đặt lại dữ liệu. Bộ mô phỏng thiết bị vẫn được dùng trong backend và kiểm thử nhánh lỗi, không cần thao tác UNLOCK/LOCK/CHECK trong buổi demo.
 
@@ -76,7 +76,7 @@ Thêm 2 xe cá nhân ngoài Hub: tổng **54 xe, 11 tài khoản**. Xe tại Hub
 - KTX A: tổng công suất lắp đặt **12.1 kW**, ba cổng đang sạc (**8.8 kW**) và một cổng lỗi. Cổng c1 phục vụ xe của `customer3`; c2/c3 phục vụ hai xe dùng chung. Hai yêu cầu của `customer4` và `customer5` chờ vì hết cổng sử dụng được. Yêu cầu customer5 được ưu tiên dù gửi sau, vì hạn cần xe sớm hơn. Technician có thể dừng rồi ngắt c2 để minh họa cấp cổng cho hàng chờ.
 - Có hai sự cố và lịch sử thuê, gửi xe, điều phối. Khu bảo trì không được cấp tài nguyên mới.
 
-Backend khởi động lại hoặc Operator đặt lại demo sẽ nạp lại dữ liệu và thu hồi các phiên. Công cụ tiến thời gian ảnh hưởng mọi tài khoản; What-if có đồng hồ riêng và không làm hết hạn các đặt chỗ thật.
+Backend khởi động lại hoặc Operator đặt lại demo sẽ nạp lại dữ liệu và thu hồi các phiên. Công cụ tiến thời gian ảnh hưởng mọi tài khoản. What-if chỉ đọc bản sao tại một thời điểm; thử phương án không làm hết hạn đặt chỗ hoặc tăng pin thật.
 
 ## Kiểm tra
 

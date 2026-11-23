@@ -282,7 +282,7 @@ export function apiController(context: AppContext): Router {
   );
   api.post('/what-if', (req, res) => res.json(context.current.whatIf.run(who(res), req.body)));
   api.post('/what-if/trial', (req, res) =>
-    res.json(context.current.whatIf.trial(who(res), req.body?.scenarioId)),
+    res.json(context.current.whatIf.trial(who(res), req.body?.scenarioId, req.body?.proposalId)),
   );
   api.post('/demo/telemetry', (req, res) => {
     const x = context.current;

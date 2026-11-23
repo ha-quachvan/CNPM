@@ -2,7 +2,7 @@
 
 Base: `/api`. JSON object cho POST/PATCH, cookie `hub_session` HttpOnly/SameSite=Strict hoặc Bearer token. Backend lấy actor từ session, không lấy `userId/operatorId` trong body. Dữ liệu trong RAM dùng chung cho một tiến trình.
 
-Mã lỗi chính: 400 dữ liệu sai; 401 hết phiên; 403 sai quyền; 404 ID không tồn tại; 409 xung đột trạng thái/tài nguyên; 408 What-if timeout; 413 body quá 32 KiB. Origin khác host bị từ chối. Lỗi không có thay đổi trạng thái nghiệp vụ từ giao dịch bị thất bại.
+Mã lỗi chính: 400 dữ liệu sai; 401 hết phiên; 403 sai quyền; 404 ID không tồn tại; 409 xung đột trạng thái/tài nguyên; 413 body quá 32 KiB. Origin khác host bị từ chối. Lỗi không có thay đổi trạng thái nghiệp vụ từ giao dịch bị thất bại.
 
 ## Tài khoản và tra cứu
 
@@ -95,7 +95,7 @@ Xác nhận đỗ tạo ParkingVisit, chỗ OCCUPIED và bản đặt COMPLETED.
 
 Sửa lệnh giữ tài nguyên nguyên tử; thất bại giữ nguyên lệnh cũ. Giữ chỗ trả và giữ chỗ điều phối không được chồng nhau.
 
-## What-if
+## What-if tĩnh
 
 `POST /what-if`, Operator:
 
@@ -103,33 +103,51 @@ Sửa lệnh giữ tài nguyên nguyên tử; thất bại giữ nguyên lệnh 
 {
   "type": "DEMAND_SURGE",
   "targetHubId": "hub-metro",
-  "parameters": { "multiplier": 2 },
-  "horizonMinutes": 60,
-  "seed": 42
+  "parameters": { "requiredVehicles": 8 }
 }
 ```
 
-| Type              | Parameters                             |
-| ----------------- | -------------------------------------- |
-| DEMAND_SURGE      | `multiplier`: 1–3                      |
-| HUB_FULL          | `{}`; tự giới hạn bởi xe và chỗ hợp lệ |
-| CHARGING_SURGE    | `multiplier`: 1–3                      |
-| PORT_FAILURE      | `failedPorts`: số nguyên 0–20          |
-| VEHICLE_IMBALANCE | `additionalVehicles`: số nguyên 0–20   |
+| Type              | Parameters                                                                                          | Hub                                      |
+| ----------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| DEMAND_SURGE      | `requiredVehicles`: nguyên 1–1000; **hoặc** `baselineDemand`: nguyên 1–1000 và `multiplier`: số 1–3 | Bắt buộc, đang hoạt động                 |
+| HUB_FULL          | `requiredFreeSpaces`: nguyên từ 0 đến tổng chỗ của Hub                                              | Bắt buộc, đang hoạt động                 |
+| VEHICLE_IMBALANCE | `minimumVehicles`: nguyên 1–1000                                                                    | Bỏ qua `targetHubId`, xét toàn mạng lưới |
+| CHARGING_SURGE    | `newRequests`: nguyên 0–1000 và không vượt số xe hợp lệ hiện có                                     | Bắt buộc, đang hoạt động                 |
+| PORT_FAILURE      | `portId`: ID cổng cụ thể thuộc Hub được chọn                                                        | Bắt buộc, đang hoạt động                 |
 
-Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả `metrics`, `comparison: {baseline, scenario}`, `proposal?`, `candidatesTested`, `actions` (0 hoặc 1 đề xuất), `timeline`, `effects`, `assumptions`, `recommendations` và `scope` (loại tình huống, Hub, thời gian, nhu cầu đi ra từ Hub, xe/cổng dùng được trước và sau tác động). Không còn cột `coordinated` trong phân tích tác động ban đầu. Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
+Chỉ nhận ba khóa `type`, `targetHubId`, `parameters`. Các tham số cũ như `horizonMinutes`, `seed`, `failedPorts`, `additionalVehicles` hoặc hệ số không có nhu cầu nền đều bị từ chối với `400`; không dùng ngầm cách tính cũ. Không được nhập lẫn hai cách khai báo nhu cầu xe. Phép nhân nhu cầu được làm tròn lên.
 
-### Thử riêng một đề xuất
+Response gồm:
 
-`POST /what-if/trial`, Operator, body `{scenarioId}` lấy từ lần `POST /what-if` trước đó. Server dùng bản sao trạng thái và đề xuất đã lưu, không nhận lệnh điều chuyển tùy ý từ client. Trả `{scenarioId,evaluatedAt,action,before,after,timeline}`; before/after có cùng nhu cầu trong tình huống.
+- `scenarioId`, `generatedAt`, `type`, `targetHubId?`, `targetHubName`, `inputs` (nhãn và giá trị giả định).
+- `metrics`: JSON object từ Map, ví dụ `{requiredVehicles:8,availableVehicles:4,shortage:4,freeSpaces:14}`.
+- `assessment`: `{summary,metrics,hubs,allocations,waiting,affected,calculations,notes}`. `metrics` là danh sách `{key,label,value,unit,previous?}`; `hubs` chứa nguồn lực thực của toàn mạng lưới. `allocations` là các cặp có thể cấp ngay; `waiting` là phần chưa ghép được sau khi xét các cặp đó.
+- `proposals`: danh sách `{id,title,description,actions,assumptions}`; có thể rỗng. Một phương án điều phối có thể gồm nhiều nguồn nếu cần. Sạc có các hướng thay thế để người dùng chọn.
+- `recommendations`, `assumptions` giải thích quy tắc và điều kiện thực hiện.
 
-- Phân tích thuộc đúng Operator, tồn tại tối đa 10 phút tính theo đồng hồ demo; giữ tối đa 20 phân tích trong RAM. Hết hạn, bị thay thế hoặc sau reset/khởi động lại: `404 AnalysisExpired`, cần phân tích lại.
-- Phân tích không có lệnh đề xuất: `409 NoSimulationProposal`. Không đủ quyền: `403`. Mã sai kiểu hoặc quá dài: `400`.
-- Thao tác không cập nhật repository vận hành, không tạo lệnh điều phối thật. Thử lại dùng đúng bản sao cũ kể cả mạng lưới đã có đặt chỗ mới.
+Actions gồm `RELOCATE` (nguồn, đích, số xe, danh sách xe thật), `ALLOCATE` (Hub, yêu cầu, xe, cổng), `RECOVER_PORT` (Hub, cổng), `DISCONNECT` (Hub, phiên đã dừng, xe, cổng). Không còn `timeline`, `comparison` hay số lượt thuê tự sinh. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
+
+### Thử một phương án đã lưu
+
+`POST /what-if/trial`, Operator:
+
+```json
+{
+  "scenarioId": "ID nhận từ POST /what-if",
+  "proposalId": "ID trong proposals"
+}
+```
+
+`proposalId` có thể bỏ để thử phương án đầu tiên. Server chỉ chấp nhận phương án thuộc phân tích đã lưu; không dùng actions client gửi thêm. Trả `{scenarioId,proposalId,evaluatedAt,proposal,before,after}`; `before` và `after` có cấu trúc `assessment`, cùng bản sao và cùng nhu cầu.
+
+- Phân tích thuộc đúng Operator, tồn tại tối đa 10 phút tính theo đồng hồ demo; giữ tối đa 20 phân tích trong RAM. Hết hạn, bị thay thế hoặc sau reset/khởi động lại: `404 AnalysisExpired`, cần tính lại. Đây là thời hạn lưu, không phải thời gian dự báo.
+- Phân tích không có phương án: `409 NoSimulationProposal`; mã phương án không thuộc phân tích: `400 InvalidSimulationPlan`; sai quyền: `403`; mã sai kiểu hoặc quá dài: `400`.
+- Với sạc, `totalWaiting` là số còn ở trạng thái WAITING trước/sau thử, `assignedByPlan` là số được chuyển thành HELD bởi phương án. `canAllocate` chỉ là số có thể cấp ngay từ cổng trống của trạng thái tương ứng; không cộng lại cổng đã HELD. Sửa cổng bận không tạo cổng trống.
+- Không cập nhật repository thật, không tạo lệnh, phiên sạc hay đóng sự cố. Thử lại dùng đúng bản sao cũ kể cả mạng lưới đã có đặt chỗ mới. Kết quả sau điều chuyển là khi đã bàn giao, trước khi cấp xe cho khách.
 
 ## Dữ liệu bản đồ Hub
 
-Mọi Hub summary/detail trả thêm `travelMinutesTo: {[hubId]: number}`. Thời gian tới chính Hub bằng 0; hai chiều dùng cùng giá trị. Các tuyến cấu hình trong `src/data/demand.ts` dùng 5/10/15 phút, cặp chưa cấu hình mặc định 10 phút. Bản đồ chỉ bố trí vị trí tương đối từ `position.lat/lng`, chưa tính km hoặc đường đi thực tế.
+Mọi Hub summary/detail trả thêm `travelMinutesTo: {[hubId]: number}`. Thời gian tới chính Hub bằng 0; hai chiều dùng cùng giá trị. Các tuyến cấu hình trong `src/data/hubTravel.ts` dùng 5/10/15 phút, cặp chưa cấu hình mặc định 10 phút. Bản đồ chỉ bố trí vị trí tương đối từ `position.lat/lng`, chưa tính km hoặc đường đi thực tế. Thời gian này chỉ phục vụ tham khảo trên bản đồ, độc lập với What-if tĩnh.
 
 ## Điều khiển demo
 
@@ -138,4 +156,4 @@ Mọi Hub summary/detail trả thêm `travelMinutesTo: {[hubId]: number}`. Thờ
 - `POST /demo/advance`: Operator, `{seconds}` 1–3600; tiến thời gian toàn buổi demo và chạy Jobs.
 - `POST /demo/reset`: Operator; tạo lại System và thu hồi mọi session.
 
-Background Jobs: hết hạn giữ chỗ → cập nhật sạc → lập lịch. What-if có đồng hồ riêng. Thao tác nghiệp vụ dùng `transact` đồng bộ trên bản draft, lỗi thì bỏ draft; bảo đảm trong một tiến trình, không phải giao dịch cơ sở dữ liệu phân tán.
+Background Jobs: hết hạn giữ chỗ → cập nhật sạc → lập lịch. What-if chỉ đọc bản sao tại thời điểm phân tích, không chạy đồng hồ mô phỏng. Thao tác nghiệp vụ dùng `transact` đồng bộ trên bản draft, lỗi thì bỏ draft; bảo đảm trong một tiến trình, không phải giao dịch cơ sở dữ liệu phân tán.

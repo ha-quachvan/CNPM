@@ -152,70 +152,75 @@ export interface Notification {
   referenceId?: ID;
   readAt?: Timestamp;
 }
-export interface SimulationMetrics {
-  requestedTrips: number;
-  servedTrips: number;
-  unservedTrips: number;
-  blockedReturns: number;
-  waitingCharges: number;
-  completedCharges: number;
-  expiredCharges: number;
-  maxChargeWaitMinutes: number;
-  lateCharges: number;
+export interface SimulationMetric {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  previous?: number;
 }
-export interface SimulationAction {
-  type: 'RELOCATE';
-  fromHubId: ID;
-  toHubId: ID;
-  quantity: number;
-  departMinute: number;
-  arrivalMinute: number;
+export interface SimulationHubResource {
+  hubId: ID;
+  hubName: string;
+  status: string;
+  availableVehicles: number;
+  donatableVehicles: number;
+  freeSpaces: number;
+  totalSpaces: number;
+  usablePorts: number;
+  freePorts: number;
+  waitingCharges: number;
+}
+export interface SimulationAllocation {
+  requestId: ID;
+  vehicleId: ID;
+  vehicleCode: string;
+  portId: ID;
+  simulated: boolean;
+}
+export interface SimulationWaiting {
+  requestId: ID;
+  vehicleId: ID;
+  vehicleCode: string;
+  reason: string;
+  simulated: boolean;
+}
+export interface SimulationAffected {
+  vehicleId: ID;
+  vehicleCode: string;
+  portId: ID;
+  status: string;
   reason: string;
 }
-export interface SimulationFrame {
-  minute: number;
-  availableVehicles: number;
-  waitingCharges: number;
-  unservedTrips: number;
-  hubs: {
-    hubId: ID;
-    availableVehicles: number;
-    occupiedSpaces: number;
-    heldSpaces: number;
-    capacity: number;
-    freePorts: number;
-    faultPorts: number;
-    chargingKw: number;
-  }[];
+export interface SimulationAssessment {
+  summary: string;
+  metrics: SimulationMetric[];
+  hubs: SimulationHubResource[];
+  allocations: SimulationAllocation[];
+  waiting: SimulationWaiting[];
+  affected: SimulationAffected[];
+  calculations: string[];
+  notes: string[];
 }
-export interface SimulationComparison {
-  baseline: SimulationMetrics;
-  scenario: SimulationMetrics;
-}
+export type SimulationAction =
+  | { type: 'RELOCATE'; fromHubId: ID; toHubId: ID; vehicleIds: ID[]; quantity: number }
+  | { type: 'ALLOCATE'; hubId: ID; requestId: ID; vehicleId: ID; portId: ID }
+  | { type: 'RECOVER_PORT'; hubId: ID; portId: ID }
+  | { type: 'DISCONNECT'; hubId: ID; sessionId: ID; vehicleId: ID; portId: ID };
 export interface SimulationProposal {
-  action: SimulationAction;
-  candidatesTested: number;
+  id: string;
+  title: string;
+  description: string;
+  actions: SimulationAction[];
+  assumptions: string[];
 }
 export interface SimulationTrial {
   scenarioId: ID;
+  proposalId: string;
   evaluatedAt: Timestamp;
-  action: SimulationAction;
-  before: SimulationMetrics;
-  after: SimulationMetrics;
-  timeline: SimulationFrame[];
-}
-export interface SimulationScope {
-  scenarioType: ScenarioType;
-  targetHubId: ID;
-  targetHubName: string;
-  horizonMinutes: number;
-  normalOutboundRequests: number;
-  scenarioOutboundRequests: number;
-  initialAvailableVehicles: number;
-  scenarioAvailableVehicles: number;
-  initialUsablePorts: number;
-  scenarioUsablePorts: number;
-  totalPorts: number;
+  proposal: SimulationProposal;
+  before: SimulationAssessment;
+  after: SimulationAssessment;
 }
 export interface ChargeRequestDTO {
   vehicleId: ID;
@@ -247,10 +252,8 @@ export interface DispatchFilterDTO {
 }
 export interface ScenarioDTO {
   type: ScenarioType;
-  targetHubId: ID;
-  parameters: Record<string, number>;
-  horizonMinutes: number;
-  seed: number;
+  targetHubId?: ID;
+  parameters: Record<string, number | string>;
 }
 export interface Telemetry {
   position: Position;

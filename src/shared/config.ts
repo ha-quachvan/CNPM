@@ -16,7 +16,9 @@ export const config = Object.freeze({
   maxScenarioMinutes: 120,
   simulationStepMinutes: 5,
   dispatchReserveVehicles: 2,
-  maxSimulationActions: 3,
+  maxSimulationCandidates: 12,
+  simulationAnalysisMinutes: 10,
+  maxSimulationAnalyses: 20,
   maxDispatchVehicles: 3,
 });
 export const minute = 60_000;

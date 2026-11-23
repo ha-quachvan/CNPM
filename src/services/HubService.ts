@@ -27,6 +27,7 @@ import {
   powerUsed,
   totalChargingPower,
 } from '../shared/business.js';
+import { travelMinutes } from '../data/demand.js';
 import { must, numeric, ensure } from '../shared/errors.js';
 export class HubService {
   constructor(private repo: InMemoryRepository) {}
@@ -111,6 +112,9 @@ export class HubService {
     const ports = [...s.ports.values()].filter((p) => p.hubId === hubId);
     return {
       ...h,
+      travelMinutesTo: Object.fromEntries(
+        [...s.hubs.keys()].map((other) => [other, travelMinutes(h.id, other)]),
+      ),
       chargingBudgetKw: totalChargingPower(s, h.id),
       chargingTotalKw: totalChargingPower(s, h.id),
       chargingActiveKw: ports

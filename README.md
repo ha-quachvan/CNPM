@@ -46,13 +46,14 @@ Google/Clerk và mã khôi phục mật khẩu là **giả lập**; không gửi
 
 ## Các luồng chính
 
+- **Bản đồ Hub:** sơ đồ tương tác từ tọa độ mẫu, chọn được từng Hub, xem tài nguyên và thời gian di chuyển giả định. Bản đồ và What-if dùng cùng bảng thời gian; không tải bản đồ ngoài hoặc xin vị trí người dùng. Bộ lọc Hub áp dụng đồng thời cho sơ đồ và danh sách.
 - **Thuê xe:** chọn xe và Hub trả; giữ xe cùng chỗ đích trong một giao dịch. Giữ xe nhận trong 15 phút; chỗ trả tiếp tục được giữ sau khi nhận. Có thể đổi Hub trả nếu giữ được chỗ mới. Phạt chỉ khi trả khác **Hub đã đăng ký**, không phải khác Hub nhận.
 - **Xe cá nhân:** đặt chỗ → xác nhận đỗ → sạc nếu cần → ngắt kết nối → lấy xe. Lịch sử vào/ra được giữ; lấy xe giải phóng chỗ.
 - **Sạc:** công suất Hub bằng tổng định mức các cổng, không cấu hình một giới hạn thấp hơn. Mỗi cổng chỉ phục vụ một xe; hàng chờ xét hạn cần xe → pin thấp → yêu cầu đến trước, cấp khi có cổng trống phù hợp. Cổng được giữ 15 phút để bắt đầu. Đạt mục tiêu hoặc dừng sạc vẫn phải rút dây để giải phóng cổng. Customer thao tác xe cá nhân; Operator giám sát và đăng ký yêu cầu cho đội xe; Technician bắt đầu/dừng/ngắt sạc xe dùng chung tại Hub. Nhật ký Operator là nhật ký toàn hệ thống, chỉ đọc và mặc định thu gọn.
 - **Thông báo:** được cấp cổng, đạt mục tiêu, dừng/ngắt sạc và hoàn tất dịch vụ. Lưu trong RAM, có trạng thái đã đọc; giao diện cập nhật định kỳ 3 giây khi đủ điều kiện.
 - **Sự cố:** báo → Technician nhận → kiểm tra mô phỏng → hoàn tất; không tự giải phóng tài nguyên còn bận.
 - **Điều phối:** Operator giữ xe nguồn và chỗ nhận; Technician nhận, vận chuyển và bàn giao sau xác minh vị trí.
-- **What-if:** giữ mô phỏng toàn mạng lưới theo bước 5 phút và heuristic điều phối có ràng buộc. Màn hình chính giải thích tình huống, ảnh hưởng, các bước của một kế hoạch và kết quả. Tình huống thuê xe hiển thị lượt chưa phục vụ trước/sau; tình huống sạc hiển thị hàng chờ, trễ hạn và thời gian chờ. Bảng so sánh ba lượt chạy, diễn biến và giới hạn nằm trong phần mở rộng; không tự áp dụng vào vận hành.
+- **What-if:** bước đầu chỉ so sánh bình thường / có tình huống, kèm một kết luận. Nhóm thuê xe hiển thị tổng yêu cầu và lượt chưa phục vụ; nhóm sạc hiển thị phiên đạt pin mục tiêu và thời gian chờ lớn nhất. Có thể bấm **Thử đề xuất này** để chạy riêng một lệnh điều chuyển và xem hiệu quả trên đúng bản sao ban đầu. Tối đa 12 phương án được xét, mỗi phương án 1–3 xe; chỉ đề xuất khi cải thiện lượt phục vụ và không tăng thiếu chỗ trả hoặc sạc trễ. Không tự tạo lệnh, tự đổi Hub trả hoặc sửa cổng. Chi tiết kỹ thuật mặc định thu gọn.
 
 Trong mô hình không có phần cứng, xác nhận đến nơi trong hộp trả/bàn giao xe cung cấp sự kiện vị trí mô phỏng. Công cụ Operator chỉ có tiến thời gian và đặt lại dữ liệu. Bộ mô phỏng thiết bị vẫn được dùng trong backend và kiểm thử nhánh lỗi, không cần thao tác UNLOCK/LOCK/CHECK trong buổi demo.
 

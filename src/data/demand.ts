@@ -9,6 +9,7 @@ export const demandRoutes = [
   { from: 'hub-library', to: 'hub-b', every: 2, travel: 10 },
 ];
 export function travelMinutes(from: string, to: string): number {
+  if (from === to) return 0;
   return (
     demandRoutes.find((r) => (r.from === from && r.to === to) || (r.to === from && r.from === to))
       ?.travel ?? 10

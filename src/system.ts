@@ -32,7 +32,7 @@ export function createSystem() {
   const charging = new ChargingService(repo, now);
   const incidents = new IncidentService(repo, simulator, now);
   const dispatch = new DispatchService(repo, simulator, now);
-  const whatIf = new WhatIfService(repo, new WhatIfEngine(undefined, now));
+  const whatIf = new WhatIfService(repo, new WhatIfEngine(undefined, now), now);
   const jobs = new BackgroundJobs(reservations, charging);
   return {
     repo,

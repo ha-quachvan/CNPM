@@ -68,95 +68,67 @@ export class WhatIfEngine {
     private now = Date.now,
   ) {}
   simulate(snapshot: NetworkSnapshot, scenario: Scenario): SimulationResult {
-    const started = performance.now();
-    const checkTime = () =>
-      ensure(
-        performance.now() - started < this.timeoutMs,
-        'SimulationTimeout',
-        'Mô phỏng vượt giới hạn thời gian.',
-        408,
-      );
-    ensure(
-      Number.isInteger(scenario.horizonMinutes) &&
-        scenario.horizonMinutes > 0 &&
-        scenario.horizonMinutes <= config.maxScenarioMinutes &&
-        scenario.horizonMinutes % step === 0,
-      'InvalidScenario',
-      'Khoảng khảo sát phải chia hết cho 5 phút và không quá 120 phút.',
-      400,
-    );
-    const original = structuredClone(snapshot.state);
-    must(original.hubs, scenario.targetHubId, 'Hub');
-    ensure(
-      original.hubs.get(scenario.targetHubId)!.status === HubStatus.ACTIVE,
-      'InvalidScenario',
-      'Chọn Hub đang hoạt động để khảo sát.',
-      400,
-    );
-    const events = this.demand(original, scenario);
-    const changed = structuredClone(original);
-    const effects = this.applyScenario(changed, scenario);
-    const shockEvents =
-      scenario.type === ScenarioType.DEMAND_SURGE ? this.surge(events, scenario) : events;
-    const baseline = this.run(
-      original,
-      events,
-      scenario,
-      snapshot.capturedAt,
-      false,
-      false,
-      checkTime,
-    );
+    const checkTime = this.timeGuard();
+    const { original, changed, events, shockEvents, effects } = this.prepare(snapshot, scenario);
+    const surge = scenario.type === ScenarioType.CHARGING_SURGE;
+    const baseline = this.run(original, events, scenario, snapshot.capturedAt, false, checkTime);
     const affected = this.run(
       changed,
       shockEvents,
       scenario,
       snapshot.capturedAt,
-      false,
-      scenario.type === ScenarioType.CHARGING_SURGE,
+      surge,
       checkTime,
     );
-    const coordinated = this.run(
-      changed,
-      shockEvents,
-      scenario,
-      snapshot.capturedAt,
-      true,
-      scenario.type === ScenarioType.CHARGING_SURGE,
-      checkTime,
-    );
-    const improved =
-      coordinated.metrics.servedTrips > affected.metrics.servedTrips &&
-      coordinated.metrics.lateCharges <= affected.metrics.lateCharges;
-    const recommendations = coordinated.actions.map(
-      (a) =>
-        `${a.type === 'RELOCATE' ? 'Chuyển' : 'Hướng'} ${a.quantity} xe: ${must(original.hubs, a.fromHubId).name} → ${must(original.hubs, a.toHubId).name}, phút ${a.departMinute}–${a.arrivalMinute}. ${a.reason}`,
-    );
-    if (coordinated.metrics.blockedReturns > affected.metrics.blockedReturns)
-      recommendations.push(
-        'Phương án phục vụ thêm lượt thuê nhưng làm tăng số yêu cầu gặp thiếu chỗ ở đích. Cần cân nhắc đánh đổi trong bảng so sánh; không coi mọi chỉ số đều được cải thiện.',
+    const candidates = this.candidates(changed, scenario);
+    let best: { action: SimulationAction; metrics: SimulationMetrics } | undefined;
+    for (const action of candidates) {
+      checkTime();
+      const trial = this.run(
+        changed,
+        shockEvents,
+        scenario,
+        snapshot.capturedAt,
+        surge,
+        checkTime,
+        action,
       );
-    if ([ScenarioType.CHARGING_SURGE, ScenarioType.PORT_FAILURE].includes(scenario.type)) {
-      recommendations.push(
-        `Theo quy tắc thời điểm cần xe → pin thấp → thứ tự đến, có ${affected.metrics.waitingCharges} yêu cầu còn chờ cuối kỳ; thời gian chờ lớn nhất ghi nhận ${affected.metrics.maxChargeWaitMinutes} phút.`,
-      );
-      if (affected.metrics.lateCharges)
-        recommendations.push(
-          `${affected.metrics.lateCharges} yêu cầu không đạt mục tiêu đúng thời điểm cần xe. Cần thỏa thuận lại thời gian hoặc kiểm tra thêm nguồn lực; mô hình không tự tạo cổng hay công suất.`,
-        );
-      if (scenario.type === ScenarioType.PORT_FAILURE)
-        recommendations.push(
-          'Ưu tiên kiểm tra cổng lỗi. Chưa giả định sửa chữa xong trong kỳ khảo sát, nên không tính lợi ích của một lần sửa chưa diễn ra.',
-        );
+      // A concise recommendation must improve service without increasing parking refusals or late charging.
+      if (
+        trial.metrics.servedTrips <= affected.metrics.servedTrips ||
+        trial.metrics.blockedReturns > affected.metrics.blockedReturns ||
+        trial.metrics.lateCharges > affected.metrics.lateCharges
+      )
+        continue;
+      const rank = (value: { action: SimulationAction; metrics: SimulationMetrics }) => [
+        -value.metrics.servedTrips,
+        value.metrics.blockedReturns,
+        value.metrics.lateCharges,
+        value.action.arrivalMinute,
+        value.action.quantity,
+      ];
+      const candidate = { action, metrics: trial.metrics };
+      const order = best
+        ? (rank(candidate)
+            .map((v, i) => v - rank(best!)[i])
+            .find((v) => v !== 0) ?? 0)
+        : -1;
+      if (!best || order < 0) best = candidate;
     }
-    if (!coordinated.actions.length)
-      recommendations.push(
-        'Không tìm được lệnh điều phối bổ sung phù hợp trong giới hạn nguồn xe, chỗ nhận và thời gian của mô hình.',
-      );
-    else if (!improved)
-      recommendations.push(
-        'Phương án thử nghiệm khả thi về tài nguyên nhưng chưa cải thiện chỉ số chính; cần xem bảng so sánh trước khi quyết định.',
-      );
+    const charging = [ScenarioType.CHARGING_SURGE, ScenarioType.PORT_FAILURE].includes(
+      scenario.type,
+    );
+    const recommendations = best
+      ? [
+          `Thử chuyển ${best.action.quantity} xe từ ${must(original.hubs, best.action.fromHubId).name} tới ${must(original.hubs, best.action.toHubId).name}; xe đến sau ${best.action.arrivalMinute} phút.`,
+        ]
+      : charging
+        ? [
+            scenario.type === ScenarioType.PORT_FAILURE
+              ? 'Cử kỹ thuật viên kiểm tra cổng lỗi; chưa giả định cổng đã sửa xong.'
+              : 'Theo dõi hàng chờ và thông báo các yêu cầu có nguy cơ không đạt pin đúng hạn.',
+          ]
+        : ['Chưa tìm được lệnh điều chuyển cải thiện kết quả trong các phương án đã xét.'];
     const initialVehicles = [...original.vehicles.values()].filter(
       (v) => v.currentHubId === scenario.targetHubId && freeVehicle(original, v),
     ).length;
@@ -174,12 +146,9 @@ export class WhatIfEngine {
           totalVehicles: original.vehicles.size,
         }),
       ),
-      comparison: {
-        baseline: baseline.metrics,
-        scenario: affected.metrics,
-        coordinated: coordinated.metrics,
-        improved,
-      },
+      comparison: { baseline: baseline.metrics, scenario: affected.metrics },
+      proposal: best ? { action: best.action, candidatesTested: candidates.length } : undefined,
+      candidatesTested: candidates.length,
       scope: {
         scenarioType: scenario.type,
         targetHubId: scenario.targetHubId,
@@ -206,22 +175,142 @@ export class WhatIfEngine {
         totalPorts: [...original.ports.values()].filter((p) => p.hubId === scenario.targetHubId)
           .length,
       },
-      actions: coordinated.actions,
+      actions: best ? [best.action] : [],
       timeline: affected.frames,
       effects,
       recommendations,
       assumptions: [
-        'Mô hình giả lập theo bước 5 phút trên bản sao; không cập nhật dữ liệu vận hành.',
-        'Nhu cầu theo tuyến cấu hình sẵn, biến động theo seed. Đây không phải dự báo học từ dữ liệu lịch sử.',
-        'Thời gian giữa Hub là giả định 5–15 phút; mỗi chuyến dùng 3% pin. Không tính đường giao thông thực tế.',
-        'Chuyến thuê và lệnh đang vận chuyển khi chụp snapshot được giả định đến đích sau 10 phút; lệnh chưa nhận không tự bắt đầu.',
-        'Xe được cấp chỗ trả trước khi xuất phát. Chỉ có xe dùng chung đủ pin và chưa bị chiếm dụng được phân bổ.',
-        'Người dùng bắt đầu sạc ở bước sau khi được cấp cổng, ngắt kết nối một bước sau khi đạt mục tiêu.',
-        'Công suất Hub bằng tổng công suất định mức các cổng. Chỉ cấp cổng còn trống, không lỗi; không có một giới hạn điện thấp hơn tổng này.',
-        'Giữ ít nhất 2 xe khả dụng ở nguồn; tối đa 3 hành động điều phối/chuyển hướng, mỗi lệnh chuyển tối đa 3 xe. Đây là heuristic, không bảo đảm tối ưu toàn cục.',
-        'Lượt được phục vụ được tính khi xe xuất phát và có chỗ trả cam kết; xe chưa tới cuối kỳ vẫn đang di chuyển.',
+        'Mô hình theo bước 5 phút trên bản sao. Số lượt thuê và chỉ số sạc tính trên toàn mạng lưới; chỉ tình huống được áp dụng tại Hub đã chọn.',
+        'Nhu cầu theo tuyến và seed giả lập, không phải dự báo học từ lịch sử. Thời gian giữa Hub lấy từ cùng bảng dùng trên bản đồ mô phỏng.',
+        'Mỗi chuyến dùng 3% pin. Xe phải đủ điều kiện và được giữ chỗ trả trước khi xuất phát; xe chỉ phục vụ tiếp khi đã đến nơi.',
+        'Chuyến thuê/lệnh đang vận chuyển lúc chụp dữ liệu được giả định đến sau 10 phút; lệnh chưa nhận không tự bắt đầu.',
+        'Cấp cổng theo hạn cần xe, pin, thời điểm tạo. Mỗi cổng phục vụ một xe; bắt đầu và rút dây ở bước kế tiếp. Công suất Hub bằng tổng định mức các cổng.',
+        'Mỗi phương án chỉ có một lệnh điều chuyển ngay đầu kỳ, tối đa 3 xe và giữ ít nhất 2 xe khả dụng ở nguồn. So sánh tối đa 12 phương án; chưa bảo đảm tối ưu toàn cục.',
+        'Chỉ đề xuất nếu tăng lượt phục vụ, không tăng từ chối do thiếu chỗ trả hoặc sạc trễ. Không tự đổi Hub trả hoặc tự tạo lệnh vận hành.',
+        'Cổng lỗi không tự được sửa trong khoảng mô phỏng. Chưa tính lợi ích của sửa chữa chưa diễn ra.',
       ],
     });
+  }
+  evaluate(
+    snapshot: NetworkSnapshot,
+    scenario: Scenario,
+    action: SimulationAction,
+  ): import('../models/types.js').SimulationTrial {
+    const checkTime = this.timeGuard();
+    const { changed, shockEvents } = this.prepare(snapshot, scenario);
+    this.validateAction(changed, scenario, action);
+    const surge = scenario.type === ScenarioType.CHARGING_SURGE;
+    const before = this.run(changed, shockEvents, scenario, snapshot.capturedAt, surge, checkTime);
+    const after = this.run(
+      changed,
+      shockEvents,
+      scenario,
+      snapshot.capturedAt,
+      surge,
+      checkTime,
+      action,
+    );
+    return {
+      scenarioId: scenario.id,
+      evaluatedAt: this.now(),
+      action: structuredClone(action),
+      before: before.metrics,
+      after: after.metrics,
+      timeline: after.frames,
+    };
+  }
+  private timeGuard(): () => void {
+    const started = performance.now();
+    return () =>
+      ensure(
+        performance.now() - started < this.timeoutMs,
+        'SimulationTimeout',
+        'Mô phỏng vượt giới hạn thời gian.',
+        408,
+      );
+  }
+  private prepare(snapshot: NetworkSnapshot, scenario: Scenario) {
+    ensure(
+      Number.isInteger(scenario.horizonMinutes) &&
+        scenario.horizonMinutes > 0 &&
+        scenario.horizonMinutes <= config.maxScenarioMinutes &&
+        scenario.horizonMinutes % step === 0,
+      'InvalidScenario',
+      'Khoảng khảo sát phải chia hết cho 5 phút và không quá 120 phút.',
+      400,
+    );
+    const original = structuredClone(snapshot.state);
+    ensure(
+      must(original.hubs, scenario.targetHubId, 'Hub').status === HubStatus.ACTIVE,
+      'InvalidScenario',
+      'Chọn Hub đang hoạt động để khảo sát.',
+      400,
+    );
+    const events = this.demand(original, scenario);
+    const changed = structuredClone(original);
+    const effects = this.applyScenario(changed, scenario);
+    const shockEvents =
+      scenario.type === ScenarioType.DEMAND_SURGE ? this.surge(events, scenario) : events;
+    return { original, changed, events, shockEvents, effects };
+  }
+  private candidates(s: NetworkState, scenario: Scenario): SimulationAction[] {
+    if ([ScenarioType.CHARGING_SURGE, ScenarioType.PORT_FAILURE].includes(scenario.type)) return [];
+    const result: SimulationAction[] = [];
+    const available = (hubId: string) =>
+      [...s.vehicles.values()].filter((v) => v.currentHubId === hubId && freeVehicle(s, v)).length;
+    const slots = (hubId: string) =>
+      [...s.spaces.values()].filter((p) => p.hubId === hubId && freeSpace(s, p)).length;
+    const incoming = scenario.type === ScenarioType.DEMAND_SURGE;
+    const others = [...s.hubs.values()]
+      .filter((h) => h.id !== scenario.targetHubId && h.status === HubStatus.ACTIVE)
+      .sort(
+        (a, b) =>
+          travelMinutes(a.id, scenario.targetHubId) - travelMinutes(b.id, scenario.targetHubId) ||
+          a.id.localeCompare(b.id),
+      );
+    for (const other of others) {
+      const fromHubId = incoming ? other.id : scenario.targetHubId;
+      const toHubId = incoming ? scenario.targetHubId : other.id;
+      const arrivalMinute = travelMinutes(fromHubId, toHubId);
+      if (arrivalMinute >= scenario.horizonMinutes) continue;
+      const max = Math.min(
+        config.maxDispatchVehicles,
+        available(fromHubId) - config.dispatchReserveVehicles,
+        slots(toHubId),
+      );
+      for (let quantity = 1; quantity <= max; quantity++) {
+        if (result.length >= config.maxSimulationCandidates) return result;
+        result.push({
+          type: 'RELOCATE',
+          fromHubId,
+          toHubId,
+          quantity,
+          departMinute: 0,
+          arrivalMinute,
+          reason: incoming
+            ? 'Bổ sung xe cho Hub tăng nhu cầu; xe chỉ được phục vụ sau khi đến nơi.'
+            : 'Giải phóng chỗ tại Hub tập trung nhiều xe; vẫn giữ xe dự phòng tại nguồn.',
+        });
+      }
+    }
+    return result;
+  }
+  private validateAction(s: NetworkState, scenario: Scenario, action: SimulationAction): void {
+    const valid = this.candidates(s, scenario).some(
+      (a) =>
+        a.type === action.type &&
+        a.fromHubId === action.fromHubId &&
+        a.toHubId === action.toHubId &&
+        a.quantity === action.quantity &&
+        a.departMinute === action.departMinute &&
+        a.arrivalMinute === action.arrivalMinute,
+    );
+    ensure(
+      valid,
+      'InvalidSimulationPlan',
+      'Lệnh thử không phù hợp với xe nguồn, chỗ nhận hoặc thời gian khảo sát.',
+      400,
+    );
   }
   private demand(s: NetworkState, scenario: Scenario): Demand[] {
     let seed = scenario.seed >>> 0;
@@ -346,9 +435,9 @@ export class WhatIfEngine {
     events: Demand[],
     scenario: Scenario,
     startAt: number,
-    coordinate: boolean,
     chargingSurge: boolean,
     checkTime: () => void,
+    plannedAction?: SimulationAction,
   ): Run {
     const s = structuredClone(initial);
     const arrivals: Arrival[] = [];
@@ -365,7 +454,6 @@ export class WhatIfEngine {
       servedTrips: 0,
       unservedTrips: 0,
       blockedReturns: 0,
-      redirectedTrips: 0,
       waitingCharges: 0,
       completedCharges: 0,
       expiredCharges: 0,
@@ -466,6 +554,22 @@ export class WhatIfEngine {
         reason,
       });
     };
+    if (plannedAction) {
+      this.validateAction(s, scenario, plannedAction);
+      relocate(
+        plannedAction.fromHubId,
+        plannedAction.toHubId,
+        plannedAction.quantity,
+        0,
+        plannedAction.reason,
+      );
+      ensure(
+        actions.length === 1,
+        'InvalidSimulationPlan',
+        'Không thể giữ đủ xe và chỗ nhận cho lệnh thử.',
+        409,
+      );
+    }
     for (let t = 0; t <= scenario.horizonMinutes; t += step) {
       checkTime();
       const ts = startAt + t * minute;
@@ -591,41 +695,16 @@ export class WhatIfEngine {
           p.status = PortStatus.CHARGING;
           v.status = VehicleStatus.CHARGING;
         }
-      const shortages = new Map<string, number>();
       if (t < scenario.horizonMinutes)
         for (const e of events.filter((e) => e.at === t)) {
           metrics.requestedTrips++;
           const v = available(e.from)[0];
           if (!v) {
             metrics.unservedTrips++;
-            shortages.set(e.from, (shortages.get(e.from) ?? 0) + 1);
             continue;
           }
-          let destination = e.to;
-          let p = slots(destination)[0];
-          if (!p && coordinate && actions.length < config.maxSimulationActions) {
-            const alternative = activeHubs()
-              .filter((h) => h.id !== e.from && h.id !== e.to && slots(h.id).length > 0)
-              .sort(
-                (a, b) =>
-                  travelMinutes(e.to, a.id) - travelMinutes(e.to, b.id) || a.id.localeCompare(b.id),
-              )[0];
-            if (alternative) {
-              destination = alternative.id;
-              p = slots(destination)[0];
-              metrics.redirectedTrips++;
-              actions.push({
-                type: 'REDIRECT',
-                fromHubId: e.from,
-                toHubId: destination,
-                originalDestinationHubId: e.to,
-                quantity: 1,
-                departMinute: t,
-                arrivalMinute: t + travelMinutes(e.from, destination),
-                reason: `Hub đích ${must(s.hubs, e.to).name} thiếu chỗ; chỗ nhận tại Hub thay thế đã được giữ trong mô hình.`,
-              });
-            }
-          }
+          const destination = e.to;
+          const p = slots(destination)[0];
           if (!p) {
             metrics.unservedTrips++;
             metrics.blockedReturns++;
@@ -675,7 +754,7 @@ export class WhatIfEngine {
           v.parkingSpaceId = undefined;
           v.status = VehicleStatus.IN_USE;
           arrivals.push({
-            at: t + (destination === e.to ? e.travel : travelMinutes(e.from, destination)),
+            at: t + e.travel,
             vehicleId: v.id,
             spaceId: p.id,
             reservationId,
@@ -758,71 +837,6 @@ export class WhatIfEngine {
           r.expiresAt = ts + 15 * minute;
           p.status = PortStatus.HELD;
           heldSince.set(r.id, t);
-        }
-      }
-      if (
-        coordinate &&
-        t < scenario.horizonMinutes &&
-        actions.length < config.maxSimulationActions
-      ) {
-        // First relieve a nearly full hub if it has enough free shared vehicles.
-        const full = activeHubs().find(
-          (h) =>
-            slots(h.id).length === 0 && available(h.id).length > config.dispatchReserveVehicles + 1,
-        );
-        if (full) {
-          const destination = activeHubs()
-            .filter((h) => h.id !== full.id && slots(h.id).length >= 2)
-            .sort(
-              (a, b) => available(a.id).length - available(b.id).length || a.id.localeCompare(b.id),
-            )[0];
-          if (destination && t + travelMinutes(full.id, destination.id) <= scenario.horizonMinutes)
-            relocate(
-              full.id,
-              destination.id,
-              Math.min(
-                config.maxDispatchVehicles,
-                available(full.id).length - config.dispatchReserveVehicles,
-                slots(destination.id).length,
-              ),
-              t,
-              'Giải phóng sức chứa ở Hub đầy; vẫn giữ xe dự phòng tại nguồn.',
-            );
-        }
-        for (const [target, missing] of shortages) {
-          if (actions.length >= config.maxSimulationActions) break;
-          if (
-            actions.some(
-              (a) => a.type === 'RELOCATE' && a.toHubId === target && a.arrivalMinute > t,
-            )
-          )
-            continue;
-          const donor = activeHubs()
-            .filter(
-              (h) =>
-                h.id !== target &&
-                available(h.id).length > config.dispatchReserveVehicles &&
-                t + travelMinutes(h.id, target) <= scenario.horizonMinutes,
-            )
-            .sort(
-              (a, b) =>
-                available(b.id).length - available(a.id).length ||
-                travelMinutes(a.id, target) - travelMinutes(b.id, target) ||
-                a.id.localeCompare(b.id),
-            )[0];
-          if (donor)
-            relocate(
-              donor.id,
-              target,
-              Math.min(
-                missing,
-                config.maxDispatchVehicles,
-                available(donor.id).length - config.dispatchReserveVehicles,
-                slots(target).length,
-              ),
-              t,
-              'Bổ sung cho các bước sau khi phát hiện thiếu xe; không phục hồi các lượt đã bị từ chối trước đó.',
-            );
         }
       }
       for (const r of s.reservations.values())

@@ -365,3 +365,86 @@ test('HTTP charging monitoring, global queue ranks and fleet technician permissi
       201,
     );
   }));
+
+test('HTTP impact and single-action trial share the saved input, enforce ownership and leave operations intact', async () =>
+  withApi(async (request: any) => {
+    const login = async (name: string) =>
+      (
+        await request('/auth/login', 'POST', {
+          identifier: name + '@hub.local',
+          password: 'Demo@12345',
+        })
+      ).body.token;
+    const op = await login('operator');
+    const customer = await login('customer');
+    const impact = await request(
+      '/what-if',
+      'POST',
+      {
+        type: 'DEMAND_SURGE',
+        targetHubId: 'hub-metro',
+        parameters: { multiplier: 2 },
+        horizonMinutes: 60,
+        seed: 42,
+      },
+      op,
+    );
+    assert.equal(impact.status, 200);
+    const r = impact.body;
+    assert.ok(r.proposal);
+    assert.equal(r.actions.length, 1);
+    assert.equal(r.comparison.coordinated, undefined);
+    assert.equal(
+      (await request('/what-if/trial', 'POST', { scenarioId: r.scenarioId }, customer)).status,
+      403,
+    );
+    assert.equal((await request('/what-if/trial', 'POST', {}, op)).status, 400);
+    assert.equal(
+      (await request('/what-if/trial', 'POST', { scenarioId: 'missing' }, op)).status,
+      404,
+    );
+    const booking = await request(
+      '/reservations/vehicle',
+      'POST',
+      { vehicleId: 'hub-a-v1', returnHubId: 'hub-b' },
+      customer,
+    );
+    assert.equal(booking.status, 201);
+    const live = (await request('/workspace', 'GET', undefined, op)).body;
+    const trial = await request(
+      '/what-if/trial',
+      'POST',
+      { scenarioId: r.scenarioId, action: { quantity: 999 } },
+      op,
+    );
+    assert.equal(trial.status, 200);
+    assert.deepEqual(trial.body.before, r.comparison.scenario);
+    assert.deepEqual(trial.body.action, r.proposal.action);
+    assert.ok(trial.body.after.servedTrips > trial.body.before.servedTrips);
+    assert.equal(trial.body.after.requestedTrips, trial.body.before.requestedTrips);
+    const current = (await request('/workspace', 'GET', undefined, op)).body;
+    assert.deepEqual(current.dispatchOrders, live.dispatchOrders);
+    assert.deepEqual(current.spaces, live.spaces);
+    assert.equal(current.reservations.find((v: any) => v.id === booking.body.id).status, 'HELD');
+    const fault = await request(
+      '/what-if',
+      'POST',
+      {
+        type: 'PORT_FAILURE',
+        targetHubId: 'hub-a',
+        parameters: { failedPorts: 1 },
+        horizonMinutes: 60,
+        seed: 42,
+      },
+      op,
+    );
+    assert.equal(fault.body.proposal, undefined);
+    assert.equal(
+      (await request('/what-if/trial', 'POST', { scenarioId: fault.body.scenarioId }, op)).status,
+      409,
+    );
+    assert.equal(
+      current.hubs.find((h: any) => h.id === 'hub-bk').travelMinutesTo['hub-library'],
+      5,
+    );
+  }));

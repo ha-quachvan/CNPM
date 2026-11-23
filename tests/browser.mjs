@@ -96,7 +96,34 @@ try {
   const customer = await account('customer');
   await customer.screenshot({ path: 'artifacts/customer-desktop.png', fullPage: true });
   await navigate(customer, 'hubs');
-  await customer.locator('[data-action=hub-detail][data-id=hub-metro]').click();
+  assert.equal(await customer.locator('.hub-map-pin').count(), 6);
+  await customer.locator('.hub-map-pin[data-id=hub-bk]').focus();
+  await customer.keyboard.press('Enter');
+  assert.equal(
+    await customer.locator('.hub-map-pin[data-id=hub-bk]').getAttribute('aria-pressed'),
+    'true',
+  );
+  assert.equal(
+    await customer
+      .locator('.hub-map-pin[data-id=hub-bk]')
+      .evaluate((n) => n === document.activeElement),
+    true,
+  );
+  assert.match(
+    await customer.locator('.hub-map-destination[data-id=hub-library]').innerText(),
+    /5 phút/,
+  );
+  await customer.screenshot({ path: 'artifacts/hubs-map-desktop.png', fullPage: true });
+  await customer.locator('#hub-search [name=area]').fill('Ký túc');
+  await customer.getByRole('button', { name: 'Tìm kiếm', exact: true }).click();
+  await customer.waitForFunction(() => document.querySelectorAll('.hub-map-pin').length === 2);
+  await customer.locator('#hub-search [name=area]').fill('khong-co-hub-nay');
+  await customer.getByRole('button', { name: 'Tìm kiếm', exact: true }).click();
+  await customer.getByRole('heading', { name: 'Chưa có Hub phù hợp', exact: true }).waitFor();
+  assert.equal(await customer.locator('.hub-map-panel').count(), 0);
+  await customer.getByRole('button', { name: 'Xóa bộ lọc', exact: true }).click();
+  assert.equal(await customer.locator('.hub-map-pin').count(), 6);
+  await customer.locator('.hub-card [data-action=hub-detail][data-id=hub-metro]').click();
   await dialog(customer).locator('[data-action=reserve-vehicle]').first().click();
   await dialog(customer).locator('[name=returnHubId]').selectOption('hub-bk');
   await clickDialog(customer, 'Giữ xe 15 phút');
@@ -257,29 +284,48 @@ try {
   const order = (await ws(operator)).dispatchOrders.find((o) => o.status === 'PENDING');
   assert.ok(order);
   await navigate(operator, 'what-if');
-  await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
-  await operator.getByRole('heading', { name: 'Kết quả mô phỏng', exact: true }).waitFor();
-  assert.equal(await operator.locator('.whatif-story details[open]').count(), 0);
-  await operator.getByText('Chưa phục vụ nếu giữ nguyên', { exact: true }).waitFor();
-  await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).waitFor();
-  assert.equal(await operator.getByText('Phương án được thử', { exact: true }).count(), 0);
-  await operator.screenshot({ path: 'artifacts/whatif-travel.png', fullPage: true });
+  await operator.getByRole('button', { name: 'Phân tích tình huống', exact: true }).click();
+  await operator.getByRole('heading', { name: 'Tác động của tình huống', exact: true }).waitFor();
+  assert.equal(await operator.locator('.impact-details[open]').count(), 0);
+  assert.equal(await operator.locator('.trial-result').count(), 0);
+  await operator
+    .locator('.scope-label')
+    .getByText('Kết quả toàn mạng lưới', { exact: false })
+    .waitFor();
+  assert.equal(await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).count(), 0);
+  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
+  await operator.screenshot({ path: 'artifacts/whatif-impact.png', fullPage: true });
+  const trialResponse = operator.waitForResponse((r) => r.url().endsWith('/api/what-if/trial'));
+  await operator.getByRole('button', { name: 'Thử đề xuất này', exact: true }).click();
+  const trial = await (await trialResponse).json();
+  await operator
+    .getByRole('heading', { name: 'Hiệu quả của một lệnh điều chuyển', exact: true })
+    .waitFor();
+  assert.ok(trial.after.servedTrips > trial.before.servedTrips);
+  assert.equal(trial.before.requestedTrips, trial.after.requestedTrips);
+  await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
+  await operator.screenshot({ path: 'artifacts/whatif-single-trial.png', fullPage: true });
+  await operator.locator('[name=parameter]').fill('2.5');
+  assert.equal(await operator.locator('[data-action=whatif-trial]').isDisabled(), true);
+  assert.equal(await operator.locator('#whatif-stale').isVisible(), true);
   for (const type of ['HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE']) {
     await operator.locator('#scenario-type').selectOption(type);
     const response = operator.waitForResponse(
       (r) => r.url().endsWith('/api/what-if') && r.request().method() === 'POST',
     );
-    await operator.getByRole('button', { name: 'Chạy mô phỏng', exact: true }).click();
+    await operator.getByRole('button', { name: 'Phân tích tình huống', exact: true }).click();
     assert.equal((await response).status(), 200);
     await operator.getByText('Mô phỏng hoàn tất.', { exact: true }).last().waitFor();
     assert.equal(await operator.locator('#scenario-type').inputValue(), type);
     assert.equal(await operator.locator('#whatif-error').isVisible(), false);
-    assert.equal(await operator.locator('.whatif-story details[open]').count(), 0);
+    assert.equal(await operator.locator('#whatif-stale').isVisible(), false);
+    assert.equal(await operator.locator('.trial-result').count(), 0);
+    assert.equal(await operator.locator('.impact-details[open]').count(), 0);
     if (['CHARGING_SURGE', 'PORT_FAILURE'].includes(type)) {
-      await operator.getByText('Không đạt pin đúng hạn', { exact: true }).waitFor();
-      assert.equal(
-        await operator.getByText('Chưa phục vụ với kế hoạch', { exact: true }).count(),
-        0,
+      await operator.getByText('Chờ lâu nhất ghi nhận', { exact: true }).waitFor();
+      assert.equal(await operator.locator('[data-action=whatif-trial]').count(), 0);
+      await operator.waitForFunction(
+        () => document.querySelector('#toasts').childElementCount === 0,
       );
       await operator.screenshot({
         path: `artifacts/whatif-${type.toLowerCase()}.png`,
@@ -287,6 +333,14 @@ try {
       });
     }
   }
+  if (await operator.locator('[data-action=whatif-trial]').count()) {
+    await operator.locator('[data-action=whatif-trial]').click();
+    await operator.locator('.trial-result').waitFor();
+  }
+  await operator.locator('.impact-details summary').click();
+  assert.equal(await operator.locator('.impact-details').evaluate((n) => n.open), true);
+  assert.ok(await operator.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await operator.locator('.impact-details summary').click();
   await operator.waitForFunction(() => document.querySelector('#toasts').childElementCount === 0);
   await operator.screenshot({ path: 'artifacts/whatif-desktop.png', fullPage: true });
   await navigate(technician, 'incidents');
@@ -345,6 +399,17 @@ try {
       await p.setViewportSize({ width, height: 900 });
       for (const hash of pages) {
         await navigate(p, hash);
+        if (hash === 'hubs') {
+          assert.equal(await p.locator('.hub-map-pin').count(), 6);
+          await p.locator('.hub-map-pin[data-id=hub-nvh]').click();
+          assert.equal(
+            await p.locator('.hub-map-pin[data-id=hub-nvh]').getAttribute('aria-pressed'),
+            'true',
+          );
+          await p.screenshot({ path: `artifacts/${name}-hubs-${width}.png`, fullPage: true });
+        }
+        if (hash === 'what-if')
+          await p.screenshot({ path: `artifacts/whatif-${width}.png`, fullPage: true });
         assert.ok(
           await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
           `${name}/${hash} overflow at ${width}`,

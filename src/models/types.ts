@@ -88,6 +88,7 @@ export interface HubSummaryDTO {
   openingHours: string;
   status: string;
   chargingBudgetKw: number;
+  travelMinutesTo: Record<ID, number>;
   chargingTotalKw: number;
   chargingActiveKw: number;
   totalPorts: number;
@@ -156,7 +157,6 @@ export interface SimulationMetrics {
   servedTrips: number;
   unservedTrips: number;
   blockedReturns: number;
-  redirectedTrips: number;
   waitingCharges: number;
   completedCharges: number;
   expiredCharges: number;
@@ -164,14 +164,13 @@ export interface SimulationMetrics {
   lateCharges: number;
 }
 export interface SimulationAction {
-  type: 'RELOCATE' | 'REDIRECT';
+  type: 'RELOCATE';
   fromHubId: ID;
   toHubId: ID;
   quantity: number;
   departMinute: number;
   arrivalMinute: number;
   reason: string;
-  originalDestinationHubId?: ID;
 }
 export interface SimulationFrame {
   minute: number;
@@ -192,8 +191,18 @@ export interface SimulationFrame {
 export interface SimulationComparison {
   baseline: SimulationMetrics;
   scenario: SimulationMetrics;
-  coordinated: SimulationMetrics;
-  improved: boolean;
+}
+export interface SimulationProposal {
+  action: SimulationAction;
+  candidatesTested: number;
+}
+export interface SimulationTrial {
+  scenarioId: ID;
+  evaluatedAt: Timestamp;
+  action: SimulationAction;
+  before: SimulationMetrics;
+  after: SimulationMetrics;
+  timeline: SimulationFrame[];
 }
 export interface SimulationScope {
   scenarioType: ScenarioType;

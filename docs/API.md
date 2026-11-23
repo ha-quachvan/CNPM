@@ -6,21 +6,21 @@ Mã lỗi chính: 400 dữ liệu sai; 401 hết phiên; 403 sai quyền; 404 ID
 
 ## Tài khoản và tra cứu
 
-| Method    | Path                           | Dữ liệu / quyền                                                                                  |
-| --------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
-| GET       | `/health`                      | Trạng thái HTTP                                                                                  |
-| GET       | `/auth/demo-accounts`          | Tài khoản/mật khẩu demo                                                                          |
-| POST      | `/auth/register`               | `{fullName,email?,phone?,password,confirmPassword}`; luôn tạo Customer                           |
-| POST      | `/auth/login`                  | `{identifier,password}`                                                                          |
-| POST      | `/auth/provider`               | `{token}` giả lập Google/Clerk                                                                   |
-| POST      | `/auth/logout`                 | `{}`                                                                                             |
-| POST      | `/auth/password-reset/request` | `{identifier}`; trả mã demo, không gửi email/SMS                                                 |
-| POST      | `/auth/password-reset`         | `{challengeId,code,newPassword,confirmPassword}`                                                 |
-| GET/PATCH | `/me`                          | Xem/sửa fullName, email, phone                                                                   |
-| GET       | `/hubs`                        | `area,vehicleType,minBattery,needsParking,needsCharging,routeHubIds`                             |
-| GET       | `/hubs/:id`                    | Xe, chỗ đỗ, cổng của Hub                                                                         |
-| GET       | `/network`                     | Operator, thống kê toàn mạng                                                                     |
-| GET       | `/workspace`                   | Dữ liệu hiện hành được lọc theo vai trò/sở hữu; có parkingVisits, notifications và công suất Hub |
+| Method    | Path                           | Dữ liệu / quyền                                                                                                     |
+| --------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| GET       | `/health`                      | Trạng thái HTTP                                                                                                     |
+| GET       | `/auth/demo-accounts`          | Tài khoản/mật khẩu demo                                                                                             |
+| POST      | `/auth/register`               | `{fullName,email?,phone?,password,confirmPassword}`; luôn tạo Customer                                              |
+| POST      | `/auth/login`                  | `{identifier,password}`                                                                                             |
+| POST      | `/auth/provider`               | `{token}` giả lập Google/Clerk                                                                                      |
+| POST      | `/auth/logout`                 | `{}`                                                                                                                |
+| POST      | `/auth/password-reset/request` | `{identifier}`; trả mã demo, không gửi email/SMS                                                                    |
+| POST      | `/auth/password-reset`         | `{challengeId,code,newPassword,confirmPassword}`                                                                    |
+| GET/PATCH | `/me`                          | Xem/sửa fullName, email, phone                                                                                      |
+| GET       | `/hubs`                        | `area,vehicleType,minBattery,needsParking,needsCharging,routeHubIds`                                                |
+| GET       | `/hubs/:id`                    | Xe, chỗ đỗ, cổng của Hub                                                                                            |
+| GET       | `/network`                     | Operator, thống kê toàn mạng                                                                                        |
+| GET       | `/workspace`                   | Dữ liệu hiện hành được lọc theo vai trò/sở hữu; có parkingVisits, notifications, công suất và ma trận thời gian Hub |
 
 Workspace không trả passwordHash. Customer chỉ nhận xe cá nhân của mình, bản đặt/phiên thuê/sạc/lượt gửi và thông báo thuộc mình. Operator xem nguồn lực và hàng đợi toàn mạng.
 
@@ -117,7 +117,19 @@ Sửa lệnh giữ tài nguyên nguyên tử; thất bại giữ nguyên lệnh 
 | PORT_FAILURE      | `failedPorts`: số nguyên 0–20          |
 | VEHICLE_IMBALANCE | `additionalVehicles`: số nguyên 0–20   |
 
-Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả metrics, comparison, actions, timeline, effects, assumptions, recommendations và `scope` (loại tình huống, Hub, thời gian, nhu cầu đi ra từ Hub, xe/cổng dùng được trước và sau tác động). Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
+Hub phải hoạt động; horizon 30/60/120; seed nguyên 0–4294967295. Trả `metrics`, `comparison: {baseline, scenario}`, `proposal?`, `candidatesTested`, `actions` (0 hoặc 1 đề xuất), `timeline`, `effects`, `assumptions`, `recommendations` và `scope` (loại tình huống, Hub, thời gian, nhu cầu đi ra từ Hub, xe/cổng dùng được trước và sau tác động). Không còn cột `coordinated` trong phân tích tác động ban đầu. Map được chuyển thành JSON object. Tham số không đúng loại tình huống bị từ chối. Không tự áp dụng kết quả. Xem [WHAT_IF.md](WHAT_IF.md).
+
+### Thử riêng một đề xuất
+
+`POST /what-if/trial`, Operator, body `{scenarioId}` lấy từ lần `POST /what-if` trước đó. Server dùng bản sao trạng thái và đề xuất đã lưu, không nhận lệnh điều chuyển tùy ý từ client. Trả `{scenarioId,evaluatedAt,action,before,after,timeline}`; before/after có cùng nhu cầu trong tình huống.
+
+- Phân tích thuộc đúng Operator, tồn tại tối đa 10 phút tính theo đồng hồ demo; giữ tối đa 20 phân tích trong RAM. Hết hạn, bị thay thế hoặc sau reset/khởi động lại: `404 AnalysisExpired`, cần phân tích lại.
+- Phân tích không có lệnh đề xuất: `409 NoSimulationProposal`. Không đủ quyền: `403`. Mã sai kiểu hoặc quá dài: `400`.
+- Thao tác không cập nhật repository vận hành, không tạo lệnh điều phối thật. Thử lại dùng đúng bản sao cũ kể cả mạng lưới đã có đặt chỗ mới.
+
+## Dữ liệu bản đồ Hub
+
+Mọi Hub summary/detail trả thêm `travelMinutesTo: {[hubId]: number}`. Thời gian tới chính Hub bằng 0; hai chiều dùng cùng giá trị. Các tuyến cấu hình trong `src/data/demand.ts` dùng 5/10/15 phút, cặp chưa cấu hình mặc định 10 phút. Bản đồ chỉ bố trí vị trí tương đối từ `position.lat/lng`, chưa tính km hoặc đường đi thực tế.
 
 ## Điều khiển demo
 

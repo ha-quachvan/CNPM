@@ -100,6 +100,12 @@ Tài liệu Submission 3 gốc được giữ nguyên theo yêu cầu của nhó
 | Thuộc tính đích trả                    | VehicleReservation, Rental           | `plannedReturnHubId`, `plannedReturnSpaceId`; phân biệt nơi đăng ký và nơi thực tế |
 | Dữ liệu lượt gửi/thông báo             | `types.ts`, NetworkState             | ParkingVisit, Notification, returnSpaceHolds; không kết nối DB                     |
 | Cơ chế phân bổ dùng chung              | `shared/scheduling.ts`               | Ưu tiên và công thức pin được dùng bởi nghiệp vụ vận hành và What-if               |
-| Mô hình What-if theo thời gian         | `WhatIfEngine`, `data/demand.ts`     | Ba lượt tính trên bản sao, kết quả so sánh, hành động có ràng buộc và thời điểm    |
+| Mô hình What-if theo thời gian         | `WhatIfEngine`, `data/demand.ts`     | Phân tích tác động, tìm kiếm lệnh một bước và thử riêng trên bản sao đã lưu        |
 
 `reserveVehicle` bổ sung đầu vào Hub trả; sạc luôn qua hàng đợi, trạng thái AWAITING_DISCONNECT/CONNECTED phân biệt ngừng điện và rảnh cổng. Các thay đổi được giải thích trong README, API và hướng dẫn demo; không sửa PDF/LaTeX Submission 3.
+
+## What-if hai bước và bản đồ Hub
+
+Giao diện What-if trình bày tác động trước, nút thử đề xuất sau. `WhatIfService.trial` và `WhatIfEngine.evaluate` là phương thức bổ sung để đánh giá riêng một lệnh điều chuyển trên bản sao đã lưu. Các phương thức M36/M37 hiện có vẫn giữ đầu vào phân tích tình huống; đối chiếu 30 lớp và 45 phương thức gốc không thay đổi tài liệu Submission 3.
+
+`HubSummaryDTO.travelMinutesTo` dùng chung `travelMinutes` với mô phỏng. `public/js/hub-map.js` bố trí sơ đồ bằng tọa độ mẫu, dùng nút HTML để chọn bằng chuột hoặc bàn phím, lọc cùng danh sách và mở chi tiết Hub hiện có. Không thêm bản đồ ngoài, cơ sở dữ liệu hoặc phần cứng.

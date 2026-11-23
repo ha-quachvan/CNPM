@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { renderHubMap } from './hub-map.js';
 import {
   esc,
   icon,
@@ -23,6 +24,10 @@ const state = {
   incidentStatus: '',
   dispatchStatus: '',
   result: null,
+  trial: null,
+  analysisDirty: false,
+  analysisBusy: false,
+  mapHubId: null,
 };
 let busy = false;
 const navItems = {
@@ -231,7 +236,7 @@ function hubsView() {
       role() === 'CUSTOMER' ? 'Tìm Hub' : 'Tra cứu mạng lưới Hub',
       'Tìm phương tiện, vị trí đỗ và cổng sạc phù hợp.',
     ) +
-    `<form id="hub-search" class="toolbar"><label class="search-input" aria-label="Tìm theo tên Hub"><input name="area" placeholder="Tìm theo tên Hub…" value="${esc(q.get('area') || '')}"></label>${select('vehicleType', option('', 'Tất cả loại xe', q.get('vehicleType')) + option('E_BIKE', 'Xe đạp điện', q.get('vehicleType')) + option('E_MOTORBIKE', 'Xe máy điện', q.get('vehicleType')), 'aria-label="Loại xe"')}${select('minBattery', option('', 'Mọi mức pin', q.get('minBattery')) + [30, 50, 70, 90].map((v) => option(String(v), `Pin từ ${v}%`, q.get('minBattery'))).join(''), 'aria-label="Pin tối thiểu"')}${select('needs', option('', 'Mọi tài nguyên', q.get('needsParking') === 'true' ? 'parking' : q.get('needsCharging') === 'true' ? 'charging' : '') + option('parking', 'Còn chỗ đỗ', q.get('needsParking') === 'true' ? 'parking' : '') + option('charging', 'Còn cổng sạc', q.get('needsCharging') === 'true' ? 'charging' : ''), 'aria-label="Nhu cầu"')}<button class="btn primary" type="submit">Tìm kiếm</button></form><div class="inline-status" style="margin-bottom:14px">${hubs.length} Hub phù hợp</div>${hubs.length ? `<div class="hub-grid">${hubs.map((h) => `<article class="hub-card"><div class="hub-top">${badge(h.status)}</div><h3>${esc(h.name)}</h3><span class="hub-address">Khu đô thị ĐHQG-HCM</span><div class="hub-counts"><div><b>${h.availableVehicles}</b><small>Xe sẵn sàng</small></div><div><b>${h.freeSpaces}</b><small>Chỗ đỗ trống</small></div><div><b>${h.freePorts}</b><small>Cổng sạc trống</small></div></div><div class="hub-footer"><span> ${esc(h.openingHours)}</span>${button('Xem Hub', 'hub-detail', h.id, 'secondary small', 'chevron')}</div></article>`).join('')}</div>` : panel('Kết quả tìm kiếm', '', empty('Chưa có Hub phù hợp', 'Thử đổi loại xe, mức pin hoặc tên Hub.', button('Xóa bộ lọc', 'clear-hubs', '', 'secondary')))}`
+    `<form id="hub-search" class="toolbar"><label class="search-input" aria-label="Tìm theo tên Hub"><input name="area" placeholder="Tìm theo tên Hub…" value="${esc(q.get('area') || '')}"></label>${select('vehicleType', option('', 'Tất cả loại xe', q.get('vehicleType')) + option('E_BIKE', 'Xe đạp điện', q.get('vehicleType')) + option('E_MOTORBIKE', 'Xe máy điện', q.get('vehicleType')), 'aria-label="Loại xe"')}${select('minBattery', option('', 'Mọi mức pin', q.get('minBattery')) + [30, 50, 70, 90].map((v) => option(String(v), `Pin từ ${v}%`, q.get('minBattery'))).join(''), 'aria-label="Pin tối thiểu"')}${select('needs', option('', 'Mọi tài nguyên', q.get('needsParking') === 'true' ? 'parking' : q.get('needsCharging') === 'true' ? 'charging' : '') + option('parking', 'Còn chỗ đỗ', q.get('needsParking') === 'true' ? 'parking' : '') + option('charging', 'Còn cổng sạc', q.get('needsCharging') === 'true' ? 'charging' : ''), 'aria-label="Nhu cầu"')}<button class="btn primary" type="submit">Tìm kiếm</button></form>${renderHubMap(hubs, state.mapHubId, d().hubs)}<div class="inline-status" style="margin-bottom:14px">${hubs.length} Hub phù hợp</div>${hubs.length ? `<div class="hub-grid">${hubs.map((h) => `<article class="hub-card"><div class="hub-top">${badge(h.status)}</div><h3>${esc(h.name)}</h3><span class="hub-address">Khu đô thị ĐHQG-HCM</span><div class="hub-counts"><div><b>${h.availableVehicles}</b><small>Xe sẵn sàng</small></div><div><b>${h.freeSpaces}</b><small>Chỗ đỗ trống</small></div><div><b>${h.freePorts}</b><small>Cổng sạc trống</small></div></div><div class="hub-footer"><span> ${esc(h.openingHours)}</span>${button('Xem Hub', 'hub-detail', h.id, 'secondary small', 'chevron')}</div></article>`).join('')}</div>` : panel('Kết quả tìm kiếm', '', empty('Chưa có Hub phù hợp', 'Thử đổi loại xe, mức pin hoặc tên Hub.', button('Xóa bộ lọc', 'clear-hubs', '', 'secondary')))}`
   );
 }
 function reservationCard(r) {
@@ -582,122 +587,103 @@ function whatIfView() {
   };
   return (
     heading(
-      'Phân tích What-if',
-      'Khảo sát tác động và kiểm tra phương án điều phối trước khi quyết định.',
+      'Mô phỏng What-if',
+      'Xem tác động của một tình huống, rồi thử một cách xử lý nếu cần.',
     ) +
-    `<div class="whatif-layout"><section class="panel scenario-panel"><div class="panel-head"><div><h2>Thiết lập tình huống</h2><p>Thay đổi một điều kiện để so sánh tác động</p></div></div><form id="whatif-form" class="panel-body">${field('type', 'Tình huống', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field('targetHubId', 'Hub xảy ra tình huống', select('targetHubId', hubOptions(f.targetHubId)))}<div id="scenario-param">${scenarioParameter(f.type, f.parameter)}</div>${field('horizonMinutes', 'Khoảng khảo sát', select('horizonMinutes', [30, 60, 120].map((v) => option(String(v), `${v} phút`, String(f.horizonMinutes))).join('')))}<details class="model-details"><summary>Thiết lập tái hiện</summary>${field('seed', 'Seed', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Cùng trạng thái, tham số và seed cho cùng chỉ số.')}</details><p class="metric-note">Chạy trên bản sao mạng lưới. Kết quả không tự tạo lệnh hoặc thay đổi dữ liệu vận hành.</p><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">Chạy mô phỏng</button></form></section><div class="analysis-content">${state.result ? renderResult(state.result) : panel('Kết quả phân tích', 'So sánh điều kiện bình thường, tình huống và phương án thử nghiệm', empty('Chọn tình huống để bắt đầu', 'Hệ thống tính nhu cầu theo thời gian, kiểm tra xe và chỗ tiếp nhận, rồi đánh giá phương án khả thi.'))}</div></div>`
+    `<div class="whatif-layout"><section class="panel scenario-panel"><div class="panel-head"><div><h2>Thiết lập tình huống</h2><p>Mặc định khảo sát trong 60 phút</p></div></div><form id="whatif-form" class="panel-body">${field('type', 'Tình huống', select('type', ['DEMAND_SURGE', 'HUB_FULL', 'CHARGING_SURGE', 'PORT_FAILURE', 'VEHICLE_IMBALANCE'].map((v) => option(v, label(v), f.type)).join(''), 'id="scenario-type"'))}${field('targetHubId', 'Hub xảy ra tình huống', select('targetHubId', hubOptions(f.targetHubId)))}<div id="scenario-param">${scenarioParameter(f.type, f.parameter)}</div><details class="model-details"><summary>Tùy chọn mô phỏng</summary>${field('horizonMinutes', 'Khoảng khảo sát', select('horizonMinutes', [30, 60, 120].map((v) => option(String(v), `${v} phút`, String(f.horizonMinutes))).join('')))}${field('seed', 'Seed', input('seed', 'number', f.seed, 'required min="0" max="4294967295" step="1"'), 'Giữ cùng seed và dữ liệu để tái hiện kết quả.')}</details><p class="metric-note">Chạy trên bản sao. Không thay đổi xe, đặt chỗ hoặc lệnh điều phối đang vận hành.</p><div id="whatif-error" class="form-error" hidden role="alert"></div><button class="btn primary full" type="submit">Phân tích tình huống</button></form></section><div class="analysis-content">${state.result ? renderResult(state.result) : panel('Tác động của tình huống', 'So sánh bình thường và khi có tình huống', empty('Chưa có kết quả phân tích', 'Chọn tình huống và Hub, sau đó bấm Phân tích tình huống.'))}</div></div>`
   );
 }
-
 function renderResult(r) {
-  const { baseline, scenario: before, coordinated: after } = r.comparison;
+  const { baseline, scenario } = r.comparison;
   const scope = r.scope;
   const charging = ['CHARGING_SURGE', 'PORT_FAILURE'].includes(scope.scenarioType);
-  const extra = after.servedTrips - before.servedTrips;
-  const last = r.timeline.at(-1);
-  const shortage = (m) => Math.max(0, m.unservedTrips - m.blockedReturns);
-  const rows = [
-    ['Yêu cầu thuê (lượt)', 'requestedTrips'],
-    ['Lượt được phục vụ', 'servedTrips'],
-    ['Lượt chưa phục vụ', 'unservedTrips'],
-    ['Trong đó: thiếu chỗ trả', 'blockedReturns'],
-    ['Lượt đồng ý đổi Hub trả', 'redirectedTrips'],
-    ['Chờ bắt đầu sạc cuối kỳ', 'waitingCharges'],
-    ['Chờ sạc lâu nhất đã quan sát (phút)', 'maxChargeWaitMinutes'],
-    ['Không đạt pin đúng hạn cần xe', 'lateCharges'],
-    ['Yêu cầu sạc hết hạn', 'expiredCharges'],
-    ['Phiên đạt pin mục tiêu', 'completedCharges'],
-  ];
-  const comparison = table(
-    [
-      'Chỉ số toàn mạng lưới',
-      'Bình thường',
-      'Có tình huống, giữ nguyên',
-      'Có tình huống, có kế hoạch',
-    ],
+  const scopeText = `${label(scope.scenarioType)} · ${scope.targetHubName} · ${scope.horizonMinutes} phút`;
+  const rows = charging
+    ? [
+        ['Phiên đạt pin mục tiêu', 'completedCharges', 'phiên'],
+        ['Chờ lâu nhất ghi nhận', 'maxChargeWaitMinutes', 'phút'],
+      ]
+    : [
+        ['Yêu cầu thuê xe', 'requestedTrips', 'lượt'],
+        ['Yêu cầu không được phục vụ', 'unservedTrips', 'lượt'],
+      ];
+  let title, explanation;
+  if (charging) {
+    const difference = scenario.completedCharges - baseline.completedCharges;
+    const wait = scenario.maxChargeWaitMinutes - baseline.maxChargeWaitMinutes;
+    title =
+      difference < 0
+        ? `Giảm ${-difference} phiên đạt pin mục tiêu`
+        : difference > 0
+          ? `Tăng ${difference} phiên đạt pin mục tiêu`
+          : wait > 0
+            ? `Thời gian chờ tăng ${wait} phút`
+            : `Có ${scenario.completedCharges} phiên đạt pin mục tiêu`;
+    explanation =
+      scope.scenarioType === 'PORT_FAILURE'
+        ? `Cổng sử dụng được tại ${esc(scope.targetHubName)} giảm từ ${scope.initialUsablePorts} còn ${scope.scenarioUsablePorts}.`
+        : r.effects.map(esc).join(' ');
+  } else {
+    const difference = scenario.unservedTrips - baseline.unservedTrips;
+    title = scenario.unservedTrips
+      ? `Có ${scenario.unservedTrips} lượt thuê không được đáp ứng`
+      : 'Các yêu cầu thuê đều được đáp ứng trong mô phỏng';
+    explanation =
+      difference > 0
+        ? `Tăng ${difference} lượt chưa phục vụ so với bình thường.`
+        : difference < 0
+          ? `Giảm ${-difference} lượt chưa phục vụ so với bình thường.`
+          : 'Số lượt chưa phục vụ bằng điều kiện bình thường.';
+  }
+  const impactTable = table(
+    ['Chỉ số', 'Bình thường', 'Có tình huống'],
     rows.map(
-      ([name, key]) =>
-        `<tr><td>${esc(name)}</td><td>${baseline[key]}</td><td>${before[key]}</td><td>${after[key]}</td></tr>`,
+      ([name, key, unit]) =>
+        `<tr><td>${esc(name)}</td><td>${baseline[key]} ${unit}</td><td>${scenario[key]} ${unit}</td></tr>`,
     ),
   );
-  const metrics = charging
-    ? stat(
-        'Chờ bắt đầu sạc cuối kỳ',
-        before.waitingCharges,
-        '',
-        `Bình thường: ${baseline.waitingCharges}. Gồm chờ cấp cổng và đã được giữ cổng.`,
-      ) +
-      stat(
-        'Không đạt pin đúng hạn',
-        before.lateCharges,
-        '',
-        `Bình thường: ${baseline.lateCharges}. Chỉ xét yêu cầu có hạn cần xe trong kỳ.`,
-      ) +
-      stat(
-        'Chờ lâu nhất ghi nhận',
-        `${before.maxChargeWaitMinutes} phút`,
-        '',
-        `Bình thường: ${baseline.maxChargeWaitMinutes} phút. Thời gian chờ đã quan sát trong kỳ.`,
-      )
-    : stat(
-        'Chưa phục vụ nếu giữ nguyên',
-        `${before.unservedTrips} lượt`,
-        '',
-        `${shortage(before)} do thiếu xe · ${before.blockedReturns} do thiếu chỗ trả`,
-      ) +
-      stat(
-        'Chưa phục vụ với kế hoạch',
-        `${after.unservedTrips} lượt`,
-        '',
-        `${shortage(after)} do thiếu xe · ${after.blockedReturns} do thiếu chỗ trả`,
-      ) +
-      stat(
-        extra >= 0 ? 'Phục vụ thêm' : 'Phục vụ ít hơn',
-        `${Math.abs(extra)} lượt`,
-        '',
-        `Đáp ứng ${before.servedTrips} → ${after.servedTrips} trên ${before.requestedTrips} yêu cầu`,
-      );
-  let explanation = r.effects.map(esc).join(' ');
-  if (scope.scenarioType === 'DEMAND_SURGE')
-    explanation += ` Lượt đi ra từ ${esc(scope.targetHubName)} tăng từ ${scope.normalOutboundRequests} lên ${scope.scenarioOutboundRequests}.`;
-  if (scope.scenarioType === 'PORT_FAILURE')
-    explanation += ` Cổng sử dụng được tại Hub: ${scope.initialUsablePorts} → ${scope.scenarioUsablePorts} trên ${scope.totalPorts} cổng lắp đặt.`;
-  const steps = r.actions
-    .map(
-      (a, i) =>
-        `<li><div class="plan-step-title">Bước ${i + 1} · ${a.type === 'RELOCATE' ? `Điều chuyển ${a.quantity} xe` : `Đề nghị đổi Hub trả cho ${a.quantity} chuyến`}</div><p>${
-          a.type === 'RELOCATE'
-            ? `<strong>${esc(hubName(a.fromHubId))} → ${esc(hubName(a.toHubId))}</strong>. Xuất phát ở phút ${a.departMinute}, tới nơi ở phút ${a.arrivalMinute}; lúc đó xe mới phục vụ được tại Hub nhận.`
-            : `Chuyến đi từ <strong>${esc(hubName(a.fromHubId))}</strong>: Hub trả dự kiến <strong>${esc(hubName(a.originalDestinationHubId))}</strong> thiếu chỗ. Đề nghị trả tại <strong>${esc(hubName(a.toHubId))}</strong>, dự kiến tới ở phút ${a.arrivalMinute}. Chỉ thực hiện nếu khách đồng ý trước khi xuất phát.`
-        }</p><p class="metric-note">${esc(a.reason)}</p></li>`,
-    )
-    .join('');
-  const plan = charging
-    ? `<h3>Cách xử lý đề xuất</h3><ol class="plan-steps"><li><div class="plan-step-title">Giữ thứ tự ưu tiên rõ ràng</div><p>Cấp cổng trống theo hạn cần xe sớm, pin thấp, rồi thứ tự gửi yêu cầu. Mỗi cổng phục vụ một xe; xe chưa rút dây vẫn chiếm cổng.</p></li><li><div class="plan-step-title">${scope.scenarioType === 'PORT_FAILURE' ? 'Cử kỹ thuật viên kiểm tra cổng lỗi' : 'Theo dõi các yêu cầu có nguy cơ trễ'}</div><p>${scope.scenarioType === 'PORT_FAILURE' ? 'Cổng lỗi được loại khỏi phân bổ. Kết quả chưa giả định đã sửa xong, nên chưa tính lợi ích sửa chữa.' : 'Thông báo khách về hạn cần xe có thể không đáp ứng; thống nhất thời gian khác nếu cần. Đây là đề xuất xử lý, chưa tự thay đổi yêu cầu.'}</p></li></ol><div class="notice">Các số trên so sánh bình thường với khi có tình huống, cùng quy tắc ưu tiên sạc. Mô hình không giả định đã bổ sung cổng hoặc đã sửa chữa để tạo kết quả tốt hơn.</div>`
-    : `<h3>${r.actions.length ? `Kế hoạch gồm ${r.actions.length} bước` : 'Chưa tìm được bước điều phối khả thi'}</h3><p class="metric-note">Đây là các bước trong cùng một kế hoạch. “Phút” tính từ đầu khoảng mô phỏng; kết quả không tự tạo lệnh vận hành.</p>${steps ? `<ol class="plan-steps">${steps}</ol>` : '<p class="recommendation">Giới hạn xe nguồn, chỗ nhận hoặc thời gian chưa cho phép điều phối thêm.</p>'}<div class="notice ${extra <= 0 || after.blockedReturns > before.blockedReturns || after.lateCharges > before.lateCharges ? 'caution' : ''}">${extra > 0 ? `Kế hoạch phục vụ thêm ${extra} lượt.` : extra === 0 ? 'Kế hoạch chưa làm tăng số lượt phục vụ.' : `Kế hoạch phục vụ ít hơn ${-extra} lượt; cần xem lại trước khi áp dụng.`} Còn ${after.unservedTrips} lượt chưa phục vụ: ${shortage(after)} do thiếu xe sẵn sàng, ${after.blockedReturns} do thiếu chỗ trả.${after.blockedReturns > before.blockedReturns ? ` Số lượt bị từ chối do thiếu chỗ tăng từ ${before.blockedReturns} lên ${after.blockedReturns}; đây là đánh đổi cần cân nhắc.` : ''}${after.lateCharges > before.lateCharges ? ` Số yêu cầu sạc trễ cũng tăng từ ${before.lateCharges} lên ${after.lateCharges}.` : ''}</div>`;
+  const action = r.proposal?.action;
+  const suggestion = action
+    ? `<p class="proposal-action">Chuyển <strong>${action.quantity} xe</strong> từ <strong>${esc(hubName(action.fromHubId))}</strong> tới <strong>${esc(hubName(action.toHubId))}</strong>.</p><p class="metric-note">Xuất phát ngay đầu khoảng mô phỏng, xe đến sau ${action.arrivalMinute} phút. Giữ xe dự phòng ở nguồn và giữ chỗ nhận trước khi chuyển.</p><button type="button" class="btn primary" data-action="whatif-trial" data-id="${esc(r.scenarioId)}" ${state.analysisDirty ? 'disabled' : ''}>Thử đề xuất này</button>`
+    : `<p class="proposal-action">${r.recommendations.map(esc).join(' ')}</p>`;
+  const trial = state.trial?.scenarioId === r.scenarioId ? renderTrial(state.trial) : '';
+  const detailRows = [
+    ['Lượt thuê được phục vụ', 'servedTrips'],
+    ['Trong đó: bị từ chối vì thiếu chỗ trả', 'blockedReturns'],
+    ['Chờ bắt đầu sạc cuối kỳ', 'waitingCharges'],
+    ['Không đạt pin đúng hạn cần xe', 'lateCharges'],
+    ['Yêu cầu sạc hết hạn', 'expiredCharges'],
+  ];
   return panel(
-    'Kết quả mô phỏng',
-    `${label(scope.scenarioType)} · ${scope.targetHubName} · ${scope.horizonMinutes} phút`,
-    `<div class="panel-body whatif-story"><div class="result-context"><h3>Điều gì thay đổi?</h3><p>${explanation}</p></div><p class="metric-note">${charging ? 'Các chỉ số sạc bên dưới tính trên toàn mạng lưới.' : `Trong ${scope.horizonMinutes} phút, toàn mạng lưới có ${before.requestedTrips} yêu cầu thuê khi xảy ra tình huống (bình thường: ${baseline.requestedTrips}). Đây là số lượt trong cả kỳ; một xe có thể phục vụ nhiều lượt.`} Tình huống chỉ được áp dụng tại Hub đã chọn.</p><div class="result-grid three">${metrics}</div>${plan}
-    <details class="model-details"><summary>Xem cách tính và bảng so sánh đầy đủ</summary><p class="metric-note">Ba lượt chạy độc lập dùng cùng lịch nhu cầu nền: bình thường, có tình huống, và có tình huống kèm kế hoạch điều phối. ${charging ? 'Kế hoạch điều phối xe không đồng nghĩa đã tăng năng lực sạc; chỉ số chính ở trên dùng lượt có tình huống, giữ nguyên.' : 'So sánh trước/sau kế hoạch trên cùng số yêu cầu.'}</p>${comparison}<p class="metric-note">Thuật toán theo bước ${r.metrics.stepMinutes} phút, sắp hàng ưu tiên sạc và điều phối tham lam có ràng buộc: giữ ít nhất 2 xe ở nguồn, tối đa 3 bước, tối đa 3 xe mỗi lệnh, giữ chỗ nhận và tính thời gian đến. Mỗi bước kiểm tra bảo toàn xe, chỗ đỗ và cổng. Không bảo đảm tối ưu toàn cục.</p>${charging && steps ? `<h3>Các bước điều phối xe trong lượt thử bổ sung</h3><ol class="plan-steps">${steps}</ol>` : ''}<ul class="assumptions">${r.recommendations
-      .filter((t) => !t.startsWith('Chuyển ') && !t.startsWith('Hướng '))
-      .map((t) => `<li>${esc(t)}</li>`)
-      .join('')}</ul></details>
-    <details class="model-details"><summary>Xem diễn biến theo thời gian</summary><p class="metric-note">Diễn biến khi có tình huống và chưa áp dụng kế hoạch.</p>${table(
-      ['Phút', 'Xe sẵn sàng', 'Lượt chưa phục vụ tích lũy', 'Chờ bắt đầu sạc'],
+    'Tác động của tình huống',
+    scopeText,
+    `<div class="panel-body impact-result"><div id="whatif-stale" class="notice caution" ${state.analysisDirty ? '' : 'hidden'}>Thiết lập đã thay đổi. Bấm Phân tích tình huống để cập nhật trước khi thử đề xuất.</div><p class="scope-label">Kết quả toàn mạng lưới · Tình huống tại ${esc(scope.targetHubName)}</p>${impactTable}<div class="impact-conclusion" role="status"><strong>${esc(title)}</strong><p>${explanation}</p></div>${!charging ? `<p class="metric-note">${r.effects.map(esc).join(' ')}</p>` : ''}${charging && (scenario.expiredCharges > baseline.expiredCharges || scenario.lateCharges > baseline.lateCharges) ? '<p class="impact-caution">Có yêu cầu sạc hết hạn hoặc trễ mốc cần xe; xem số liệu trong Chi tiết mô phỏng.</p>' : ''}<div class="single-proposal"><h3>${action ? 'Một đề xuất để thử' : 'Hướng xử lý'}</h3>${suggestion}<p class="metric-note">${charging ? 'Chưa giả định sửa xong cổng hoặc bổ sung nguồn lực sạc.' : 'Thử trên bản sao; chưa tạo lệnh điều phối thật.'}</p><div id="trial-error" class="form-error" role="alert" hidden></div></div><div id="whatif-trial-result">${trial}</div><details class="model-details impact-details"><summary>Chi tiết mô phỏng</summary>${table(
+      ['Chỉ số bổ sung toàn mạng lưới', 'Bình thường', 'Có tình huống'],
+      detailRows.map(
+        ([name, key]) =>
+          `<tr><td>${esc(name)}</td><td>${baseline[key]}</td><td>${scenario[key]}</td></tr>`,
+      ),
+    )}<p class="metric-note">Yêu cầu thuê bị từ chối khi không có xe hoặc chỗ trả; thiếu chỗ là một phần của số chưa phục vụ. Chờ sạc gồm các yêu cầu chưa bắt đầu, còn thời gian chờ là giá trị đã quan sát trong kỳ.</p><p class="metric-note">Đã xét ${r.candidatesTested} phương án, mỗi phương án tối đa một lệnh chuyển 1–3 xe. Chỉ đề xuất nếu tăng lượt phục vụ và không tăng từ chối vì thiếu chỗ hoặc sạc trễ. Không bảo đảm tối ưu toàn cục.</p><h3>Diễn biến khi có tình huống, chưa điều chuyển</h3>${table(
+      ['Phút', 'Xe sẵn sàng', 'Lượt chưa phục vụ', 'Chờ cấp cổng'],
       r.timeline.map(
         (f) =>
           `<tr><td>${f.minute}</td><td>${f.availableVehicles}</td><td>${f.unservedTrips}</td><td>${f.waitingCharges}</td></tr>`,
       ),
-    )}<h3>Trạng thái Hub cuối kỳ</h3>${table(
-      ['Hub', 'Xe sẵn sàng', 'Đang đỗ + đã giữ / sức chứa', 'Cổng trống / lỗi'],
-      last.hubs.map(
-        (h) =>
-          `<tr><td>${esc(hubName(h.hubId))}</td><td>${h.availableVehicles}</td><td>${h.occupiedSpaces} + ${h.heldSpaces} / ${h.capacity}</td><td>${h.freePorts} / ${h.faultPorts}</td></tr>`,
-      ),
-    )}</details>
-    <details class="model-details"><summary>Giả định và giới hạn mô hình</summary><ul class="assumptions">${r.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul><p class="metric-note">Chụp trạng thái lúc ${date(r.generatedAt)} · ${r.metrics.totalVehicles} xe trong mô hình. Kết quả thay đổi khi trạng thái vận hành thay đổi.</p></details></div>`,
+    )}<ul class="assumptions">${r.assumptions.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><p class="metric-note">Dữ liệu chụp lúc ${date(r.generatedAt)} · ${r.metrics.totalVehicles} xe. Đề xuất có thể thử lại trong 10 phút trên đúng bản sao này.</p></details></div>`,
   );
+}
+function renderTrial(trial) {
+  const gain = trial.after.servedTrips - trial.before.servedTrips;
+  return `<section class="trial-result" aria-label="Hiệu quả đề xuất"><h3>Hiệu quả của một lệnh điều chuyển</h3><p class="metric-note">Cùng ${trial.before.requestedTrips} yêu cầu trong tình huống đã phân tích, dùng đúng bản sao ban đầu.</p>${table(
+    ['Chỉ số toàn mạng lưới', 'Giữ nguyên', 'Thực hiện đề xuất'],
+    [
+      ['Yêu cầu không được phục vụ', 'unservedTrips'],
+      ['Lượt được phục vụ', 'servedTrips'],
+    ].map(
+      ([name, key]) =>
+        `<tr><td>${esc(name)}</td><td>${trial.before[key]} lượt</td><td>${trial.after[key]} lượt</td></tr>`,
+    ),
+  )}<p class="trial-conclusion"><strong>${gain > 0 ? `Phục vụ thêm ${gain} lượt thuê.` : 'Đề xuất chưa làm tăng lượt phục vụ.'}</strong> Còn ${trial.after.unservedTrips} lượt chưa được đáp ứng.</p><p class="metric-note">Xe tới sau ${trial.action.arrivalMinute} phút. Kết quả chỉ mô phỏng, không áp dụng vào vận hành.</p></section>`;
 }
 
 function demoView() {
@@ -1104,6 +1090,14 @@ function bindForms() {
     state.dispatchStatus = e.target.value;
     render();
   });
+  document.querySelector('#whatif-form')?.addEventListener('input', () => {
+    if (!state.result) return;
+    state.analysisDirty = true;
+    const notice = document.querySelector('#whatif-stale');
+    if (notice) notice.hidden = false;
+    const trialButton = document.querySelector('[data-action="whatif-trial"]');
+    if (trialButton) trialButton.disabled = true;
+  });
   document.querySelector('#scenario-type')?.addEventListener('change', (e) => {
     const type = e.target.value;
     const form = document.querySelector('#whatif-form');
@@ -1113,19 +1107,23 @@ function bindForms() {
   });
   document.querySelector('#whatif-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (state.analysisBusy) return;
+    state.analysisBusy = true;
     const f = Object.fromEntries(new FormData(e.target));
     const key = ['DEMAND_SURGE', 'CHARGING_SURGE'].includes(f.type)
       ? 'multiplier'
       : f.type === 'PORT_FAILURE'
         ? 'failedPorts'
         : 'additionalVehicles';
-    const submit = e.target.querySelector('[type=submit]');
-    submit.disabled = true;
+    const controls = [...e.target.querySelectorAll('input, select, button')];
+    controls.forEach((control) => {
+      control.disabled = true;
+    });
     const error = document.querySelector('#whatif-error');
     error.hidden = true;
     try {
       state.scenarioForm = { ...f };
-      state.result = await api('/what-if', {
+      const result = await api('/what-if', {
         method: 'POST',
         body: {
           type: f.type,
@@ -1135,13 +1133,19 @@ function bindForms() {
           seed: Number(f.seed),
         },
       });
+      state.result = result;
+      state.trial = null;
+      state.analysisDirty = false;
       render();
       toast('Mô phỏng hoàn tất.');
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;
     } finally {
-      submit.disabled = false;
+      state.analysisBusy = false;
+      controls.forEach((control) => {
+        control.disabled = false;
+      });
     }
   });
   document.querySelector('#profile-form')?.addEventListener('submit', async (e) => {
@@ -1161,6 +1165,48 @@ function bindForms() {
   });
 }
 const handlers = {
+  'hub-map-select': (id) => {
+    state.mapHubId = id;
+    const hubs = state.hubQuery ? state.hubResults || [] : d().hubs;
+    const map = document.querySelector('.hub-map-panel');
+    const restoreFocus = document.activeElement?.dataset.action === 'hub-map-select';
+    if (map) map.outerHTML = renderHubMap(hubs, id, d().hubs);
+    if (restoreFocus)
+      document.querySelector(`.hub-map-pin[data-id="${id}"]`)?.focus({ preventScroll: true });
+  },
+  'whatif-trial': async (id) => {
+    if (
+      !state.result ||
+      state.result.scenarioId !== id ||
+      state.analysisDirty ||
+      state.analysisBusy
+    )
+      return;
+    const button = document.querySelector('[data-action="whatif-trial"]');
+    button.disabled = true;
+    button.textContent = 'Đang thử đề xuất…';
+    try {
+      const trial = await api('/what-if/trial', { method: 'POST', body: { scenarioId: id } });
+      if (state.result?.scenarioId !== id || state.analysisDirty) return;
+      state.trial = trial;
+      const region = document.querySelector('#whatif-trial-result');
+      if (!region) return;
+      region.innerHTML = renderTrial(trial);
+      document.querySelector('#trial-error').hidden = true;
+      toast('Đã tính hiệu quả đề xuất trên cùng dữ liệu.');
+    } catch (err) {
+      const output = document.querySelector('#trial-error');
+      if (output && state.result?.scenarioId === id) {
+        output.textContent = err.message;
+        output.hidden = false;
+      }
+    } finally {
+      if (button.isConnected) {
+        button.disabled = state.analysisDirty;
+        button.textContent = 'Thử lại đề xuất';
+      }
+    }
+  },
   go: (id) => {
     document.querySelector('#dialog').close();
     go(id);
@@ -1452,12 +1498,14 @@ document.addEventListener('click', async (e) => {
   const fn = handlers[b.dataset.action];
   if (!fn) return;
   try {
-    if (b.tagName === 'BUTTON') b.disabled = true;
+    if (b.tagName === 'BUTTON' && b.dataset.action !== 'hub-map-select') b.disabled = true;
     await fn(b.dataset.id);
   } catch (err) {
     toast(err.message, true);
   } finally {
-    if (b.tagName === 'BUTTON') b.disabled = false;
+    if (b.tagName === 'BUTTON')
+      b.disabled =
+        b.dataset.action === 'whatif-trial' && (state.analysisDirty || state.analysisBusy);
   }
 });
 window.addEventListener('hashchange', () => {

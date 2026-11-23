@@ -281,6 +281,9 @@ export function apiController(context: AppContext): Router {
     res.json(context.current.dispatch.complete(who(res), String(req.params.id))),
   );
   api.post('/what-if', (req, res) => res.json(context.current.whatIf.run(who(res), req.body)));
+  api.post('/what-if/trial', (req, res) =>
+    res.json(context.current.whatIf.trial(who(res), req.body?.scenarioId)),
+  );
   api.post('/demo/telemetry', (req, res) => {
     const x = context.current;
     const s = x.repo.snapshot().state;

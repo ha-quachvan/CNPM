@@ -224,6 +224,8 @@ export class SimulationResult {
   recommendations!: string[];
   comparison?: import('./types.js').SimulationComparison;
   scope?: import('./types.js').SimulationScope;
+  proposal?: import('./types.js').SimulationProposal;
+  candidatesTested?: number;
   actions?: import('./types.js').SimulationAction[];
   timeline?: import('./types.js').SimulationFrame[];
   assumptions?: string[];

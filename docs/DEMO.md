@@ -15,7 +15,7 @@
 
 ## 0:40–2:20 — Thuê xe một chiều
 
-1. Customer → Tìm Hub → Ga Metro ĐHQG → chọn một xe đủ pin.
+1. Customer → Tìm Hub → chỉ vào sơ đồ vị trí các Hub; chọn Metro và xem thời gian tới Hub khác. Bấm Xem chi tiết Hub để chọn xe đủ pin.
 2. Bấm Giữ xe, chọn Hub trả **Đại học Bách khoa**, xác nhận.
 3. Chỉ vào mã nhận xe, thời hạn 15 phút và chỗ trả được giữ.
 4. Bấm Nhận xe, nhập mã đúng. Có thể nhập sai một lần nếu còn thời gian.
@@ -49,15 +49,15 @@ Dùng báo cáo mẫu `incident-demo` về khóa xe tại Bách khoa. Technician
 
 ## 5:50–6:50 — What-if
 
-1. Operator → What-if → Nhu cầu di chuyển tăng tại Metro, hệ số 2, 60 phút, seed 42.
-2. Bấm chạy một lần. Đọc phần “Điều gì thay đổi?” để phân biệt nhu cầu ở Metro với tổng lượt toàn mạng lưới.
-3. Đọc ba số chính: chưa phục vụ nếu giữ nguyên, chưa phục vụ với kế hoạch, phục vụ thêm.
-4. Chỉ vào một bước của kế hoạch: nguồn, đích, số xe và phút đến trong mô phỏng. Bảng ba lượt chạy nằm trong mục mở rộng, không cần mở trong demo 8 phút.
-5. Nếu có cảnh báo đánh đổi hoặc phương án chưa cải thiện, đọc đúng kết quả. Không khẳng định mọi tình huống đều có giải pháp tốt hơn.
+1. Operator → What-if → Nhu cầu di chuyển tăng tại Metro, hệ số 2; mặc định 60 phút và seed 42.
+2. Bấm **Phân tích tình huống**. Chỉ đọc bảng hai cột: bình thường và có tình huống. Ví dụ dữ liệu ban đầu: 48 → 63 yêu cầu, 0 → 13 lượt chưa phục vụ. Chỉ rõ đây là tổng toàn mạng lưới.
+3. Đọc **một** đề xuất điều chuyển, nguồn/đích/số xe và thời gian tới. Bấm **Thử đề xuất này** nếu còn thời gian.
+4. Đọc bảng Giữ nguyên / Thực hiện đề xuất. Với dữ liệu ban đầu, chuyển 3 xe Bách khoa → Metro, tới sau 10 phút: chưa phục vụ 13 → 10, phục vụ thêm 3 lượt.
+5. Sau các thao tác demo thật, số liệu có thể khác. Đọc đúng kết quả hoặc thông báo chưa tìm được đề xuất; chưa tạo lệnh thật.
 
-Câu giải thích ngắn: “Mô hình tiến mỗi bước 5 phút, cập nhật xe đi–đến và sạc. Khi thiếu xe hoặc chỗ, thử phương án trong giới hạn nguồn lực rồi chạy lại. Kết quả không tự áp dụng vào mạng lưới.”
+Câu giải thích: “Mô phỏng tiến từng bước 5 phút, theo dõi xe, chỗ trả và sạc. Hệ thống thử các lệnh điều chuyển một bước có giới hạn tài nguyên; nút thử dùng lại đúng bản sao ban đầu để so sánh.”
 
-Có thể thay bằng Hub đầy tại KTX A để thấy chuyển hướng sang một Hub còn chỗ. Không cần chạy cả năm tình huống trong 8 phút.
+Chi tiết kỹ thuật mặc định thu gọn. Không cần chạy cả năm tình huống trong 8 phút. Cổng lỗi chỉ cho thấy tác động sạc và đề nghị kiểm tra; chưa giả định sửa xong.
 
 ## 6:50–7:20 — Một nhánh lỗi
 
@@ -92,7 +92,8 @@ KTX A có 4 cổng: c1 (3.3 kW) sạc xe cá nhân của `customer3`; c2 (3.3 kW
 - Vì sao còn công suất mà vẫn chờ? Công suất lắp đặt có thể thuộc cổng lỗi hoặc cổng chưa rút dây; mỗi cổng chỉ phục vụ một xe. Không phải chờ vì hạn mức điện thấp hơn tổng cổng. Nếu cổng thực sự trống, đúng Hub/cổng ưu tiên và xe hợp lệ, bộ lập lịch sẽ cấp theo thứ tự ưu tiên.
 - Operator có xe riêng trong nhật ký sạc? Không. Đây là nhật ký toàn hệ thống có tên người yêu cầu và Hub. Operator chỉ giám sát, Technician xử lý sạc đội xe; chủ xe xử lý sạc cá nhân.
 - Công cụ demo còn gì? Tiến thời gian và đặt lại dữ liệu. Các phản hồi thiết bị vẫn được giả lập tự động trong backend; không cần thao tác ba lệnh thiết bị trên UI.
-- What-if có phải AI? Không; mô hình theo bước thời gian, lịch nhu cầu giả lập và heuristic có ràng buộc.
+- What-if có phải AI? Không; mô hình theo bước thời gian, lịch nhu cầu giả lập và tìm kiếm có giới hạn trên các lệnh điều chuyển một bước.
+- Bản đồ có phải bản đồ thật? Không; sơ đồ vị trí từ tọa độ mẫu, thời gian giả định dùng cùng bảng với What-if. Chọn Hub để xem tài nguyên; không xin vị trí hoặc chỉ đường ngoài đời.
 - Có bảo đảm tối ưu? Không. Kết quả được chạy lại, thể hiện cả đánh đổi và khả năng chưa tìm được phương án cải thiện.
 - Tại sao không lấy lượt thuê trừ số xe? Lượt trong cả kỳ khác lượng xe tại một thời điểm; xe có thể phục vụ lại sau khi đến nơi.
 

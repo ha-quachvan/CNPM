@@ -11,6 +11,7 @@ import {
   ReservationKind,
   ScenarioType,
 } from '../src/models/enums.js';
+import { travelMinutes } from '../src/data/demand.js';
 import { DomainError } from '../src/shared/errors.js';
 const throws = (fn: () => unknown, code: string) =>
   assert.throws(fn, (e: unknown) => e instanceof DomainError && e.code === code);
@@ -558,7 +559,8 @@ test('five What-if presets preserve live state, inventory/capacity and determini
         assert.deepEqual(x.repo.snapshot().state, before);
         assert.equal(r.metrics.get('totalVehicles'), 54);
         assert.equal(r.timeline!.length, horizonMinutes / 5 + 1);
-        assert.ok(r.actions!.length <= 3);
+        assert.ok(r.actions!.length <= 1);
+        assert.ok(r.candidatesTested! <= 12);
         assert.equal(r.scope!.scenarioType, type);
         assert.equal(r.scope!.targetHubId, scenario.targetHubId);
         assert.equal(r.scope!.horizonMinutes, horizonMinutes);
@@ -569,7 +571,20 @@ test('five What-if presets preserve live state, inventory/capacity and determini
           for (const h of frame.hubs) assert.ok(h.occupiedSpaces + h.heldSpaces <= h.capacity);
         for (const a of r.actions!) {
           assert.ok(a.quantity > 0 && a.quantity <= 3);
-          assert.ok(a.arrivalMinute > a.departMinute);
+          assert.equal(a.type, 'RELOCATE');
+          assert.equal(a.departMinute, 0);
+          assert.equal(a.arrivalMinute, travelMinutes(a.fromHubId, a.toHubId));
+        }
+        if (r.proposal) {
+          const trial = engine.evaluate(snapshot, scenario, r.proposal.action);
+          assert.deepEqual(trial.before, r.comparison!.scenario);
+          assert.ok(trial.after.servedTrips > trial.before.servedTrips);
+          assert.ok(trial.after.blockedReturns <= trial.before.blockedReturns);
+          assert.ok(trial.after.lateCharges <= trial.before.lateCharges);
+          assert.equal(trial.after.requestedTrips, trial.before.requestedTrips);
+          for (const frame of trial.timeline)
+            for (const h of frame.hubs) assert.ok(h.occupiedSpaces + h.heldSpaces <= h.capacity);
+          assert.deepEqual(x.repo.snapshot().state, before);
         }
         for (const m of Object.values(r.comparison!).filter((v) => typeof v === 'object') as any[])
           assert.equal(m.servedTrips + m.unservedTrips, m.requestedTrips);
@@ -599,7 +614,9 @@ test('unit demand multiplier matches the baseline; surge uses trip counts instea
     r.scope!.scenarioOutboundRequests - r.scope!.normalOutboundRequests,
   );
   assert.ok(r.actions!.length > 0);
-  assert.ok(r.comparison!.coordinated.servedTrips > r.comparison!.scenario.servedTrips);
+  const trial = x.whatIf.trial('operator', r.scenarioId);
+  assert.ok(trial.after.servedTrips > trial.before.servedTrips);
+  assert.equal(trial.before.requestedTrips, trial.after.requestedTrips);
 });
 test('What-if validates roles, supported parameters, intervals and timeout', () => {
   const x = createSystem();
@@ -728,4 +745,96 @@ test('charging controls belong to personal owner or fleet technician, never Oper
   x.charging.stop('customer3', 'session-seed-active');
   x.charging.disconnect('customer3', 'session-seed-active');
   assertInventory(x);
+});
+
+test('What-if trial reuses a saved snapshot despite live bookings; actor and expiry checks apply', () => {
+  const x = createSystem();
+  const r = x.whatIf.run('operator', {
+    type: ScenarioType.DEMAND_SURGE,
+    targetHubId: 'hub-metro',
+    parameters: { multiplier: 2 },
+    horizonMinutes: 60,
+    seed: 42,
+  });
+  assert.ok(r.proposal);
+  hold(x);
+  const live = x.repo.snapshot().state;
+  const trial = x.whatIf.trial('operator', r.scenarioId);
+  assert.deepEqual(trial.before, r.comparison!.scenario);
+  assert.ok(trial.after.servedTrips > trial.before.servedTrips);
+  assert.deepEqual(x.whatIf.trial('operator', r.scenarioId).after, trial.after);
+  assert.deepEqual(x.repo.snapshot().state, live);
+  throws(() => x.whatIf.trial('customer', r.scenarioId), 'Forbidden');
+  x.repo.transact((s) =>
+    s.users.set(
+      'operator-other',
+      new User({ ...s.users.get('operator')!, id: 'operator-other', email: 'other-op@hub.local' }),
+    ),
+  );
+  throws(() => x.whatIf.trial('operator-other', r.scenarioId), 'AnalysisExpired');
+  throws(() => x.whatIf.trial('operator', ''), 'AnalysisExpired');
+  x.advance(601);
+  throws(() => x.whatIf.trial('operator', r.scenarioId), 'AnalysisExpired');
+});
+test('What-if stored analyses are bounded and charging scenarios do not suggest relocation', () => {
+  const x = createSystem();
+  let oldest = '';
+  for (let n = 0; n < 21; n++) {
+    const r = x.whatIf.run('operator', {
+      type: ScenarioType.PORT_FAILURE,
+      targetHubId: 'hub-a',
+      parameters: { failedPorts: 1 },
+      horizonMinutes: 30,
+      seed: n,
+    });
+    assert.equal(r.proposal, undefined);
+    assert.equal(r.candidatesTested, 0);
+    assert.equal(r.actions!.length, 0);
+    if (!n) oldest = r.scenarioId;
+    else throws(() => x.whatIf.trial('operator', r.scenarioId), 'NoSimulationProposal');
+  }
+  throws(() => x.whatIf.trial('operator', oldest), 'AnalysisExpired');
+});
+test('What-if rejects an invalid relocation and preserves the supplied snapshot', () => {
+  const x = createSystem();
+  const snapshot = x.repo.snapshot();
+  const original = structuredClone(snapshot);
+  const scenario = new Scenario({
+    id: 'invalid-plan',
+    creatorId: 'operator',
+    type: ScenarioType.DEMAND_SURGE,
+    targetHubId: 'hub-metro',
+    parameters: new Map([['multiplier', 2]]),
+    horizonMinutes: 60,
+    seed: 42,
+  });
+  const engine = new WhatIfEngine();
+  for (const quantity of [0, 4, 999])
+    throws(
+      () =>
+        engine.evaluate(snapshot, scenario, {
+          type: 'RELOCATE',
+          fromHubId: 'hub-a',
+          toHubId: 'hub-metro',
+          quantity,
+          departMinute: 0,
+          arrivalMinute: 10,
+          reason: 'invalid',
+        }),
+      'InvalidSimulationPlan',
+    );
+  assert.deepEqual(snapshot.state, original.state);
+  assert.equal(snapshot.capturedAt, original.capturedAt);
+});
+test('Hub map travel matrix uses the same symmetric durations as What-if', () => {
+  const x = createSystem();
+  const hubs = x.hubs.search({});
+  for (const a of hubs)
+    for (const b of hubs) {
+      assert.equal(a.travelMinutesTo[b.id], travelMinutes(a.id, b.id));
+      assert.equal(a.travelMinutesTo[b.id], b.travelMinutesTo[a.id]);
+      assert.equal(a.travelMinutesTo[a.id], 0);
+    }
+  assert.equal(hubs.find((h) => h.id === 'hub-metro')!.travelMinutesTo['hub-b'], 15);
+  assert.equal(hubs.find((h) => h.id === 'hub-bk')!.travelMinutesTo['hub-library'], 5);
 });
